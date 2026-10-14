@@ -1,0 +1,6 @@
+function v3 = cmc_triplequad(x,y,z,CUT1,CUT2,sigma1_D,sigma2_D,A,B,NOM)
+
+
+v3 = Fun_Cut_Measure_Cut_Dist(x,CUT1(1),CUT2(1),sigma1_D(1),sigma2_D(2),A(1),B(1)).*...
+     Fun_Cut_Measure_Cut_Dist(y,CUT1(2),CUT2(2),sigma1_D(2),sigma2_D(2),A(2),B(2)).*...
+     Fun_Cut_Measure_Cut_Dist(z,CUT1(3),CUT2(3),sigma1_D(3),sigma2_D(2),A(3),B(3));
