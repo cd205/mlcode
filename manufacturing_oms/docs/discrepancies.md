@@ -1,0 +1,15 @@
+# Discrepancy log
+
+Each entry records a place where the Python engine, the thesis, or the MATLAB disagree, or where a source has a defect. Per ADR 0002, the engine follows the corrected interpretation, and faithful behaviour is kept only in oracle tests.
+
+| ID | Source | Discrepancy | Evidence | Resolution | Covering test |
+|---|---|---|---|---|---|
+| D1 | Thesis Eq 3.59 (p. 89); `StageCostFun.m` scrap loop | The S∘D feed-in scrap formula counts only one-hop feed-ins and uses the Initial State's transition row for steps out of larger Rework States. It is exact for N ≤ 2 and too low for N ≥ 3. | Independent check, 2026-10-15: N=3, μ=[6,5.5,5], σ=[2,2.5,3], [3,7]: exact 0.53254 vs 0.52813 (−4.4e-3). N=4 Table 3.8 means: −4.9e-6. | Engine uses Σ m_{I,j} p_{j,S} SC_j ([ADR 0001](adr/0001-exact-absorbing-chain-scrap-cost.md)) | Stage 2: Eq 3.59 oracle |
+| D2 | Thesis Eq 3.59 and p. 100 example | The scrap term is printed with a "−" sign. Scrap always adds to cost, as Eq 3.79 and the code do. | User decision, 2026-10-15. Still to be confirmed visually on p. 89. | Treated as a typo; scrap adds to cost | R3 |
+| D3 | `StageCostFun_MultiMu.m` header | The comment says `sigs` is a "Correlation matrix". It is the vector of per-Feature standard deviations. | Code: `corr2cov(sigs(...), CorrMatrix)` | Documentation-only | n/a |
+| D4 | Thesis Table 3.5 footnote (p. 103) | It prints "10 + 12 = 27", which doesn't add up. Which components make up the cumulative Stage-II Scrap Cost of 27 still needs confirming visually. | Extracted footnote text; arithmetic | Use SC₂ = 27 as printed in the table | R5 |
+| D5 | `StageCostFun.m`: `PRR = temp(temp>0)` | It takes the self-loop probabilities by keeping the *non-zero* diagonal entries of Q. If any Rework State has p_{S,S} = 0 (it underflows to 0, or its Rework Side makes it impossible), the vector shortens and every later index shifts silently. | Code inspection | Engine indexes states explicitly; oracle port reproduces the defect only on inputs where it is harmless | Stage 2: oracle |
+| D6 | Thesis Table 4.3 (p. 145) | The connecting-rod optimal means [6.87, 3.95, 6.84, 3.95] don't match the millimetre specification limits in Table 4.1. | Reported by the thesis extraction | Do not use as a reference case until resolved | n/a (Stage 7) |
+| D7 | Thesis terminology | "Case I/II" means *cost formulas* in Table 3.1 (Khasawneh & Bowling 2008 Eq 5 vs Eq 3.44) but *Mean Setting schemes* in Sec. 3.5 / Tables 3.10–3.11. | pp. 79, 110–113 | Code uses `per_feature` / `per_group_size` / `per_state`. The KB 2008 formula is an oracle only (R3-oracle). | R3, R6 |
+| D8 | `Probs_nVars_MultiMu.m` | The rows of the MU matrix are ordered by `Rw_vars` group, [N-Feature; 1-Feature; 2-Feature; …; (N−1)-Feature], not by group size. | Code inspection | Converted to `per_group_size` only in the oracle adapter | Stage 4 |
+| D9 | `normcdf.m` at the repo root (Minka lightspeed) | It shadows the MATLAB Statistics Toolbox `normcdf` when the repo root is on the path. It is numerically equivalent for `normcdf(x,m,s)`. | Code inspection | No action; recorded for reproducibility | n/a |
