@@ -21,5 +21,5 @@ Statuses:
 | Khasawneh & Bowling 2008 Eq 5 (via Table 3.1) | Literature 2-Feature profit (cost-formula "Case I") | `K_and_B_2008_Example` | `KandBMarkov_DualChars`, `mvncdf` | oracle only | R3-oracle | planned |
 | Eq 3.26–3.27 (p. 64), Sec. 3.5 | Mean Settings per Rework Group Size | `StageCostFun_MultiMu`, `Probs_nVars_MultiMu` | as above | `model.MeanSettings`, `optimisation.tying` | R6, R7 | planned |
 | Eq 3.77–3.78 (pp. 95–96) | Serial multi-Stage Expected Profit | `Costs_MultiStage_MultiFeature` | `StageCostFun` | `economics.evaluate_sequence` | R5; script oracle | planned |
-| Table 3.9 (p. 109) | Inspection Cost and Sequence comparison | none found | none | `model.InspectionCost`, `optimisation.search_sequences` | R8 | planned |
+| Tables 3.8–3.9, Fig 3.27 (pp. 108–110) | Inspection Cost and Sequence comparison | none found | none | `model.InspectionCost`, `optimisation.search_sequences` | R8 | planned |
 | Sec. 4.2 | Copula joint distributions | root copula scripts (deferred) | `copulacdf` | `distributions.GaussianCopula` | Stage 7 | planned |

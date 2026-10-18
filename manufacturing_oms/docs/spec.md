@@ -70,7 +70,7 @@ Q = transient→transient,  M = (I − Q)⁻¹,  m_{I,j} = M[I, j]
 Final Conformance Probability   f_C  = Σ_j m_{I,j} p_{j,C}
 Expected scrap cost             Sr   = Σ_j m_{I,j} p_{j,X} SC_j     (ADR 0001)
 Expected rework cost            Rw   = Σ_{S≠I} m_{I,S} RC_S
-Expected inspection cost        In   = (IC_stage + IC_feature·N) · Σ_j m_{I,j}  ⚠ see U3
+Inspection cost (flat)          In   = IC_stage + IC_feature·N                  (U3, resolved)
 ```
 
 **Sanity checks.** f_C + Σ_j m_{I,j} p_{j,X} = 1, and every m_{I,j} ≥ 0.
@@ -80,10 +80,11 @@ Expected inspection cost        In   = (IC_stage + IC_feature·N) · Σ_j m_{I,j
 Stages I…W run in series and are independent of each other (A5). Let r_i = Π_{l<i} f_{C,l} be the probability of reaching Stage i.
 
 ```
-E(PR) = SP · Π_i f_{C,i} − Σ_i (PC_i + Sr_i + Rw_i + In_i) · r_i
+E(PR)     = SP · Π_i f_{C,i} − Σ_i (PC_i + Sr_i + Rw_i) · r_i
+E(PR) − I,  where I = Σ_i In_i
 ```
 
-The result is per part started. Scrap Costs are entered by the user and already include the value added upstream (A6).
+The result is per part started. Following the thesis (Table 3.9, pp. 109–110), I is a flat charge per part started. It is not weighted by r_i or by the expected number of inspections, so re-inspection after rework is free. Because I does not depend on the means, the optimal means are the same for E(PR) and E(PR) − I. Scrap Costs are entered by the user and already include the value added upstream (A6).
 
 ### 2.3 Mean Settings and tying schemes
 
@@ -265,14 +266,15 @@ search_sequences(features_in_order, stage_builder, selling_price, scheme, **opt_
 | # | Case | Inputs | Printed result | Pre-check |
 |---|---|---|---|---|
 | R1 | Fig 3.12/3.14, 1 Feature | μ=5, σ=1, [3,7] | first-pass conform 0.9545; m_{I,I}=1.0233; f_C≈0.9767 | f_C = 0.97672, rework visits 0.02328 ✓ |
-| R2 | Table 3.3, 1 Feature | U=12, L=8, σ=1, SP=120, PC=25, RC=10, SC=15 | μ\*=10.61 (profit), 10.09 (min cost) | μ\* = 10.614 ✓ (min cost not yet checked) |
+| R2 | Table 3.3, 1 Feature | U=12, L=8, σ=1, SP=120, PC=25, RC=10, SC=15 | μ\*=10.61 (profit), 10.09 (min cost) | μ\* = 10.614 ✓; min PC+Sr+Rw μ = 10.0875 ✓ |
 | R3 | Table 3.1, 2 Features, Eq 3.44 | L=[8,13], U=[12,17], σ=1, SP=120, PC=45, RC={1}:15, {2}:12, {1,2}:20; SC=I:8, {1}:9, {2}:11, {1,2}:14 | 71.4287 @ [10.5115, 15.5651] | 71.42872 ✓ |
 | R3-oracle | Table 3.1, Khasawneh & Bowling (KB) 2008 formula (port of `K_and_B_2008_Example`) | same as R3 | 71.1592 @ [10.5514, 15.6080] | oracle only (D7) |
-| R4 | Table 3.7, 2 Features parallel | RC=[15,12,27], SC=27 for every state | 71.17 @ [10.537, 15.590] | – |
+| R4 | Table 3.7, 2 Features parallel (inputs visually confirmed 2026-10-17) | L=[8,13], U=[12,17], σ=1, SP=120, PC=45, RC={1}:15, {2}:12, {1,2}:27; SC=27 for every state | 71.17 @ [10.537, 15.590]; min production cost 46.753 @ [10.128, 15.181] | 71.1723 @ [10.537, 15.590]; 46.7530 @ [10.128, 15.181] ✓ |
 | R5 | Table 3.5, 2 Stages serial | PC=[25,20], RC=[15,12], SC=[10,27] | 71.41 @ [10.466, 15.591] | 71.4120 ✓ |
-| R6 | Tables 3.10/3.11 `per_feature` vs `per_group_size` | U=6, L=4, σ²=2, SP=500, PC=50, RC=[25,25,50], SC=150 | 40.87 @ [6.85, 6.85]; 41.66 @ [6.75, 6.75, 7.02, 7.02]; f_C 0.5933/0.5935 | – |
-| R7 | Table 3.13 correlated | as R6 with ρ = ±0.8 | 56.4038/58.3309 (ρ=0.8); 45.11/47.10 (ρ=−0.8) | – |
-| R8 | Table 3.9 Sequences, 4 Features | SP=120, PC=[25,20,12,15], RC=[15,12,8,10], SC=[10,17,5,12], L=[8,13,10,7], U=[12,17,14,11], σ=1, IC=0.5+0.5/Feature | e.g. Seq 1 41.7523; Seq 8 40.8657 | – (expect small N≥3 gap, ADR 0001) |
+| R6 | Tables 3.10/3.11 `per_feature` vs `per_group_size` (visually confirmed 2026-10-17) | U=6, L=4, **σ=2** (not σ²=2), **SP=400** (not the printed 500, D11), PC=50, RC={1}:25, {2}:25, {1,2}:50, SC=150, Rework Side above U. Case II order: (μ₁,₁, μ₁,₂) = dual-feature means (I and {1,2}); (μ₂,₁, μ₂,₂) = single-feature rework means | 40.87 @ [6.85, 6.85]; 41.66 @ [6.75, 6.75, 7.02, 7.02]; f_C 0.5933/0.5935; production cost (Sr+Rw) 146.44/145.75 | 40.8747 @ 6.851; 41.6581 @ [6.748, 7.022]; Sr+Rw 146.44/145.75 ✓ |
+| R7 | Table 3.13 correlated (visually confirmed 2026-10-17) | as R6 with ρ = ±0.8 | ρ=0.8: 56.4038 @ 6.65 / 58.3309 @ [6.52, 7.02]; Sr+Rw 140.24/138.93; f_C 0.6166/0.6181. ρ=−0.8: 45.11 @ 6.80 / 47.10 @ [6.57, 7.02]; Sr+Rw 139.65/136.60; f_C 0.5869/0.5842 | all ✓ (56.4038, 58.3309, 45.1141, 47.0993) |
+| R8 | Tables 3.8/3.9 and Fig 3.27 Sequences, 4 Features (inputs visually confirmed 2026-10-17) | SP=120, PC=[25,20,12,15], RC=[15,12,8,10], SC=[10,17,5,12], L=[8,13,10,7], U=[12,17,14,11], σ=1, IC=0.5+0.5/Feature | e.g. Seq 1 41.7523; Seq 8 40.8657 | – (expect small N≥3 gap, ADR 0001) |
+| R9 | Tables 4.1/4.3 connecting rod, copula (Stage 7; D6) | Units cm: L=[6.9, 3.925], U=[7.1, 4.075]; x₁ Normal σ=0.1362; x₂ tLocation-Scale scale 0.0527, ν=2.2522; Gaussian copula ρ=0.7052; Rework Side below L; SP=100, PC=20, RC={1}:5, {2}:5, {1,2}:10, SC=50; `per_group_size` | 44.47 @ [6.8737, 3.9514, 6.8441, 3.9486] | 44.4708 @ printed means ✓ |
 
 **Oracle tests** (ports of MATLAB, `test_and_checks/oracles/`):
 - Eq 3.59 S∘D scrap must equal the engine exactly for N ≤ 2. For N = 3 and 4 the gap is recorded and shown to be negative.
@@ -335,10 +337,10 @@ Every stage ends with green `pytest` on `test_and_checks/` and one runnable scri
 ## 8. Open unknowns (to resolve inside the named stage)
 
 - **U1 (Stage 2):** which deterministic algorithm is used for 2D/3D box probabilities, and the accuracy it can prove. The candidates are SciPy with a tight `abseps`, or a dedicated bivariate/trivariate routine.
-- **U2 (Stage 1):** the R2 minimum-cost optimum (10.09) needs a precise "production cost" objective, presumably E(cost) per conforming part. Confirm against the text on p. 101.
-- **U3 (Stage 3):** how Inspection Cost is charged. Is it once per Stage entry or on every inspection, including after each rework? The formula above charges every inspection (Σ_j m_{I,j}). Decide by reproducing Table 3.9.
-- **U4 (Stage 4):** the R6/R7 column alignments came from extracted text. Confirm visually on pp. 111–116 before encoding them as tests.
-- **U5 (Stage 2):** R4 (Table 3.7) and R8 inputs also came from misaligned extracted tables. Confirm them visually.
+- **U2 (Stage 1), resolved 2026-10-18:** production cost = PC + Sr + Rw per part started (p. 101: "Production cost is E(PR) − SP f_{I,C}", printed without the sign flip). It is not per conforming part, which would give μ = 10.33. Minimising it reproduces R2 (10.0875) and R4 (46.7530 @ [10.128, 15.181]). Tables 3.11/3.13 report Sr + Rw without PC (D12), so the engine reports PC, Sr and Rw separately and tests compare the matching sum.
+- **U3 (Stage 3), resolved 2026-10-17:** Inspection Cost is a flat IC_stage + IC_feature·N per Stage, summed over the Sequence and subtracted from E(PR) per part started (thesis pp. 108–110: "an inspection process is implicit after each stage… a cost of 0.5 units with a further 0.5 units for each feature inspected"). Table 3.9's I column matches this for Seqs 1–7. Seq 8 is a misprint (D10).
+- **U4 (Stage 4), resolved 2026-10-17:** R6/R7 confirmed visually and reproduced by a throwaway calculation once σ=2 and SP=400 are used (D11).
+- **U5 (Stage 2), resolved 2026-10-17:** R4 and R8 inputs confirmed visually (Tables 3.7, 3.8).
 
 ## 9. Future extensions (each needs its own spec)
 
