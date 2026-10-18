@@ -1,6 +1,6 @@
 # OMS Python Reconstruction: Analysis & Implementation Spec
 
-Status: **draft for review**. Nothing gets implemented until this is approved.
+Status: **approved 2026-10-18**. Stage 0 is complete; Stage 1 is next.
 
 This spec builds on:
 - [GLOSSARY.md](../GLOSSARY.md): the canonical terms. This document uses them exactly as defined there.
