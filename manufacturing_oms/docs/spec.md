@@ -1,6 +1,6 @@
 # OMS Python Reconstruction: Analysis & Implementation Spec
 
-Status: **approved 2026-10-18**. Stage 0 is complete. The Stage 1 engine is done (#2); its MATLAB oracles (#3) are still open. Stage 2 is next.
+Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is next.
 
 This spec builds on:
 - [GLOSSARY.md](../GLOSSARY.md): the canonical terms. This document uses them exactly as defined there.
