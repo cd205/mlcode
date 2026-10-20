@@ -1,6 +1,6 @@
 # OMS Python Reconstruction: Analysis & Implementation Spec
 
-Status: **approved 2026-10-18**. Stage 0 is complete; Stage 1 is next.
+Status: **approved 2026-10-18**. Stage 0 is complete. The Stage 1 engine is done (#2); its MATLAB oracles (#3) are still open. Stage 2 is next.
 
 This spec builds on:
 - [GLOSSARY.md](../GLOSSARY.md): the canonical terms. This document uses them exactly as defined there.
@@ -254,6 +254,7 @@ search_sequences(features_in_order, stage_builder, selling_price, scheme, **opt_
 - Multi-start points are seeded.
 - The method, tolerances, number of evaluations and seed are recorded in the result.
 - Bounded Nelder–Mead is used when the objective contains Monte Carlo terms.
+- Stage 1 provides the single-Stage form `optimise_means(stage, selling_price, scheme="per_feature", *, objective="expected_profit" | "production_cost", ...)`, because `Sequence` arrives in Stage 3. Stage 4 generalises it to the Sequence signature above.
 
 ## 6. Reference cases & acceptance criteria
 

@@ -9,6 +9,7 @@ Requires standalone [uv](https://docs.astral.sh/uv/). From `manufacturing_oms/`:
 ```
 uv sync          # create .venv with numpy, scipy and pytest
 uv run pytest    # run every check in test_and_checks/
+uv run mypy      # strict type check of src/
 ```
 
 The design, reference cases and staged plan are in [docs/spec.md](docs/spec.md).
@@ -20,9 +21,9 @@ The design, reference cases and staged plan are in [docs/spec.md](docs/spec.md).
 - `legacy_matlab/validation`: numerical examples and comparisons retained as future Python regression tests.
 - `legacy_matlab/optimisation`: original general-purpose MATLAB optimisers (third-party utilities; review licences before porting).
 - `legacy_matlab/historical`: earlier and RP variants retained for comparison, **not** canonical implementations.
-- `src/oms`: intended Python package layout (not translated yet).
-- `examples`: future runnable Python reproduction scripts (not implemented).
-- `test_and_checks`: future correctness and thesis-regression checks (not implemented).
+- `src/oms`: the Python engine (`model`, `distributions`, `markov`, `economics`, `optimisation`; spec §5).
+- `examples`: runnable reproductions of thesis cases, e.g. `uv run python examples/single_feature_table_3_3.py` (R2).
+- `test_and_checks`: correctness and thesis-regression checks.
 
 ## Core MATLAB call graph
 
