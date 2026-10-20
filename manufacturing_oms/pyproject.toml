@@ -1,0 +1,22 @@
+[project]
+name = "oms"
+version = "0.1.0"
+description = "Optimal Mean Setting for multi-feature manufacturing with rework and scrap (Python reconstruction of the thesis MATLAB code)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "scipy",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["test_and_checks"]

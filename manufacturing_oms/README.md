@@ -2,6 +2,17 @@
 
 This is a curated **copy** of the thesis-related MATLAB manufacturing-state, rework, scrap, expected-cost and optimal-mean-setting code. Original MATLAB files in the repository root are unchanged.
 
+## Python package: setup and checks
+
+Requires standalone [uv](https://docs.astral.sh/uv/). From `manufacturing_oms/`:
+
+```
+uv sync          # create .venv with numpy, scipy and pytest
+uv run pytest    # run every check in test_and_checks/
+```
+
+The design, reference cases and staged plan are in [docs/spec.md](docs/spec.md).
+
 ## Folders
 
 - `legacy_matlab/core`: stage-level Markov and probability calculations, state/matrix construction.
