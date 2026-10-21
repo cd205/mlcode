@@ -1,6 +1,6 @@
 # OMS Python Reconstruction: Analysis & Implementation Spec
 
-Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is in progress: multi-Feature Gaussian evaluation (#4) is done, U1 is resolved (ADR 0003), and the oracles (#5, #6) are next.
+Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is in progress: multi-Feature Gaussian evaluation (#4) is done, U1 is resolved (ADR 0003), the Eq 3.59 and KB 2008 oracles (#5) are done, and the remaining MATLAB oracles (#6) are next.
 
 This spec builds on:
 - [GLOSSARY.md](../GLOSSARY.md): the canonical terms. This document uses them exactly as defined there.
@@ -272,7 +272,7 @@ search_sequences(features_in_order, stage_builder, selling_price, scheme, **opt_
 | R1 | Fig 3.12/3.14, 1 Feature | μ=5, σ=1, [3,7] | first-pass conform 0.9545; m_{I,I}=1.0233; f_C≈0.9767 | f_C = 0.97672, rework visits 0.02328 ✓ |
 | R2 | Table 3.3, 1 Feature | U=12, L=8, σ=1, SP=120, PC=25, RC=10, SC=15 | μ\*=10.61 (profit), 10.09 (min cost) | μ\* = 10.614 ✓; min PC+Sr+Rw μ = 10.0875 ✓ |
 | R3 | Table 3.1, 2 Features, Eq 3.44 | L=[8,13], U=[12,17], σ=1, SP=120, PC=45, RC={1}:15, {2}:12, {1,2}:20; SC=I:8, {1}:9, {2}:11, {1,2}:14 | 71.4287 @ [10.5115, 15.5651] | 71.42872 ✓ |
-| R3-oracle | Table 3.1, Khasawneh & Bowling (KB) 2008 formula (port of `K_and_B_2008_Example`) | same as R3 | 71.1592 @ [10.5514, 15.6080] | oracle only (D7) |
+| R3-oracle | Table 3.1, Khasawneh & Bowling (KB) 2008 formula (port of `K_and_B_2008_Example`) | same as R3 | 71.1592 @ [10.5514, 15.6080] | 71.1592 ✓ (oracle only, D7) |
 | R4 | Table 3.7, 2 Features parallel (inputs visually confirmed 2026-10-17) | L=[8,13], U=[12,17], σ=1, SP=120, PC=45, RC={1}:15, {2}:12, {1,2}:27; SC=27 for every state | 71.17 @ [10.537, 15.590]; min production cost 46.753 @ [10.128, 15.181] | 71.1723 @ [10.537, 15.590]; 46.7530 @ [10.128, 15.181] ✓ |
 | R5 | Table 3.5, 2 Stages serial | PC=[25,20], RC=[15,12], SC=[10,27] | 71.41 @ [10.466, 15.591] | 71.4120 ✓ |
 | R6 | Tables 3.10/3.11 `per_feature` vs `per_group_size` (visually confirmed 2026-10-17) | U=6, L=4, **σ=2** (not σ²=2), **SP=400** (not the printed 500, D11), PC=50, RC={1}:25, {2}:25, {1,2}:50, SC=150, Rework Side above U. Case II order: (μ₁,₁, μ₁,₂) = dual-feature means (I and {1,2}); (μ₂,₁, μ₂,₂) = single-feature rework means | 40.87 @ [6.85, 6.85]; 41.66 @ [6.75, 6.75, 7.02, 7.02]; f_C 0.5933/0.5935; production cost (Sr+Rw) 146.44/145.75 | 40.8747 @ 6.851; 41.6581 @ [6.748, 7.022]; Sr+Rw 146.44/145.75 ✓ |
