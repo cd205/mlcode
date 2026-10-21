@@ -20,6 +20,11 @@ import numpy as np
 from oracles.mvncdf import mvncdf
 
 
+def number_of_transient_states(N):
+    """eta: the Initial State plus every Rework State (Equation 2.45 Dodd [2014])."""
+    return 1 + sum(comb(N, k) for k in range(1, N + 1))
+
+
 def combinator(N, K):
     """combinator(N, K, 'c'): rows of 1-based combinations, in lexicographic order."""
     return [list(c) for c in combinations(range(1, N + 1), K)]
@@ -51,6 +56,17 @@ def k_s_matrix(k, alpha, eta, m, UP, UPv):
     return SMat
 
 
+def s_matrix_cell(N):
+    """SMat_Cell: the S-matrix for each Rework Group Size k = 1..N, as `StageCostFun` builds it."""
+    eta = number_of_transient_states(N)
+    UP, UPv = _upsilon(N)
+    SMat_Cell = []
+    for k in range(1, N + 1):
+        alpha, m, _ = _alpha_m_delta(N, eta, k)
+        SMat_Cell.append(k_s_matrix(k, alpha, eta, m, UP, UPv))
+    return SMat_Cell
+
+
 def k_d_matrix(m, PIs, alpha, delta, eta):
     DMat = np.ones((eta - (alpha - 1), m))
     DMat[:m, :m] = np.eye(m) * np.asarray(PIs[alpha - 2 : delta])
@@ -70,7 +86,7 @@ def probs_n_vars(MU, L, U, sigs, rho):
     MU_R = L + (U - MU)  # reverse the axes
 
     num_vars = len(MU)
-    eta = 1 + sum(comb(num_vars, i) for i in range(1, num_vars + 1))
+    eta = number_of_transient_states(num_vars)
 
     Rw_vars = [combinator(num_vars, num_vars)] + [combinator(num_vars, i) for i in range(1, num_vars)]
     PCs, PSs, Pps = [], [], []
@@ -128,13 +144,8 @@ def stage_cost_fun(MU, sigs, rho, U, L, R_Cost, S_Cost):
     R_Cost has one entry per Rework State in UPv order; S_Cost has the Initial State first, then UPv.
     """
     N = len(MU)
-    eta = 1 + sum(comb(N, k) for k in range(1, N + 1))  # Equation 2.45 Dodd [2014]
-    UP, UPv = _upsilon(N)
-
-    SMat_Cell = []
-    for k in range(1, N + 1):
-        alpha, m, delta = _alpha_m_delta(N, eta, k)
-        SMat_Cell.append(k_s_matrix(k, alpha, eta, m, UP, UPv))
+    eta = number_of_transient_states(N)
+    SMat_Cell = s_matrix_cell(N)
 
     PIs, PSs, PMat = probs_n_vars(MU, L, U, sigs, rho)
     P = PMat

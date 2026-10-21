@@ -1,6 +1,6 @@
 # OMS Python Reconstruction: Analysis & Implementation Spec
 
-Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is in progress: multi-Feature Gaussian evaluation (#4) is done, U1 is resolved (ADR 0003), the Eq 3.59 and KB 2008 oracles (#5) are done, and the remaining MATLAB oracles (#6) are next.
+Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is complete: multi-Feature Gaussian evaluation (#4), U1 (ADR 0003), the Eq 3.59 and KB 2008 oracles (#5), and the multi-Feature transition oracles (#6, discrepancies D15 and D16).
 
 This spec builds on:
 - [GLOSSARY.md](../GLOSSARY.md): the canonical terms. This document uses them exactly as defined there.
@@ -126,7 +126,7 @@ This is a static scan of all 45 curated files. Identifiers that match any `.m` f
 | Related, deferred (non-Gaussian / CMC) | `CostModel_Example1`, `CostModel_Norm_Example1`, `CostModel_CMC_Example1`, `Opt_CMC_3d_Example1`, `Opt_NORM_3d_Example1` | Three-Feature cost examples. `Opt_CMC_3d_Example1` uses `copulacdf` and needs the root file `Fun_Cut_Measure_Cut_pdf.m` (**not curated**). Revisit in Stage 7 of the plan. |
 | **Unrelated** | `validation/Example1` | A Kriging/Branin/GA demo (reaches about 80 surrogate/sqplab files). Wrongly filed; leave it in place. |
 | Third-party optimisers | `fminsearchcon`, `ga`, `gaoptimset` (John D'Errico) | Not ported. SciPy replaces them. |
-| Historical | everything in `historical/` | `StageCostFun_old` (full-Σ input, N≤3 via `Probs_1/2/3Var`) is a useful oracle for correlated N≤3. The `_RP_*` copies are not authoritative. |
+| Historical | everything in `historical/` | `StageCostFun_old` (full-Σ input, N≤3 via `Probs_1/2/3Var`) is a useful oracle for correlated N≤2 and independent N=3; for correlated N=3 its pair Rework States drop the correlation (D15). The `_RP_*` copies are not authoritative. |
 
 ### 3.2 External/runtime dependencies
 
@@ -282,7 +282,7 @@ search_sequences(features_in_order, stage_builder, selling_price, scheme, **opt_
 
 **Oracle tests** (ports of MATLAB, `test_and_checks/oracles/`):
 - Eq 3.59 S∘D scrap must equal the engine exactly for N ≤ 2. For N = 3 and 4 the gap is recorded and shown to be negative.
-- `Probs_1/2/3Var`, `MarkovProcess_*`, `Markov_TriChars` and `KandBMarkov_DualChars` must match the engine's transition probabilities and m/f values to 1e-10 at the same inputs.
+- `Probs_1/2/3Var`, `MarkovProcess_*`, `Markov_TriChars` and `KandBMarkov_DualChars` must match the engine's transition probabilities and m/f values to 1e-10 at the same inputs (1e-8 for correlated 2–3D boxes). Where the MATLAB is defective (D15, D16), the tests assert the characterised deviation instead.
 - Monte Carlo simulation of the chain (a fresh Python implementation of A1–A7) must agree with f_C, m and E(PR) within 4 standard errors at a fixed seed.
 
 **Property tests:**
