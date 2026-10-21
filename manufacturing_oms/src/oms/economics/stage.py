@@ -46,9 +46,10 @@ class StageResult:
         return selling_price * self.final_conformance - self.production_cost
 
 
-def evaluate_stage(stage: Stage, means: MeanSettings) -> StageResult:
+def evaluate_stage(stage: Stage, means: MeanSettings, *, rng_seed: int = 0) -> StageResult:
+    """Evaluate one Stage at the given Mean Settings. `rng_seed` seeds the Monte Carlo boxes of 4+ Features."""
     means.check_against(stage)
-    transitions = stage_transitions(stage, means)
+    transitions = stage_transitions(stage, means, rng_seed=rng_seed)
     visits = expected_visits(stage.states, transitions)
     costs = stage.costs
     return StageResult(

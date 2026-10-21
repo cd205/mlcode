@@ -1,11 +1,12 @@
 # OMS Python Reconstruction: Analysis & Implementation Spec
 
-Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is next.
+Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is in progress: multi-Feature Gaussian evaluation (#4) is done, U1 is resolved (ADR 0003), and the oracles (#5, #6) are next.
 
 This spec builds on:
 - [GLOSSARY.md](../GLOSSARY.md): the canonical terms. This document uses them exactly as defined there.
 - [ADR 0001](adr/0001-exact-absorbing-chain-scrap-cost.md): exact absorbing-chain scrap cost.
 - [ADR 0002](adr/0002-matlab-ports-are-test-oracles-only.md): MATLAB ports exist only as test oracles.
+- [ADR 0003](adr/0003-gaussian-box-probability-algorithms.md): Gaussian box-probability algorithms (U1).
 - [traceability.md](traceability.md) and [discrepancies.md](discrepancies.md).
 - Thesis: [CDodd_Thesis.pdf](CDodd_Thesis.pdf). The core material is Ch. 3 (printed pp. 47–118). PDF page = printed page + 20.
 
@@ -214,7 +215,7 @@ class Sequence:
 
 ```python
 class JointDistribution(Protocol):
-    def box_probability(self, means: ArrayLike, lower: ArrayLike, upper: ArrayLike) -> Probability: ...
+    def box_probability(self, means: ArrayLike, lower: ArrayLike, upper: ArrayLike, *, rng_seed: int = 0) -> Probability: ...
     def marginal(self, indices: Sequence[int]) -> "JointDistribution": ...
 
 @dataclass(frozen=True)
@@ -224,11 +225,13 @@ class Probability:
     abs_error: float                  # 0 for analytic
 ```
 
-The `MultivariateNormal(sigmas, corr)` implementation:
+The `MultivariateNormal(sigmas, corr)` implementation ([ADR 0003](adr/0003-gaussian-box-probability-algorithms.md)):
+- The box factorises over independent blocks of the correlation matrix, and ±1-correlated Features are merged, so independent Features are always analytic.
 - **1 dimension:** `scipy.special.ndtr` (analytic).
-- **2–3 dimensions:** deterministic. Either Owen's T / Drezner-type routines, or SciPy `multivariate_normal.cdf` with fixed `rng` and a tight `abseps`, *verified* against analytic independent cases. ⚠ This choice is resolved in Stage 2 (U1).
-- **4 or more dimensions:** seeded QMC with the tolerance reported.
-- The constructor checks that the correlation matrix is positive semi-definite. `corr=float` builds an equicorrelation matrix.
+- **2 dimensions:** a port of Genz's BVNU (Gauss–Legendre, deterministic), reported error 4e-15.
+- **3 dimensions:** adaptive quadrature over one variable of the conditional bivariate box, reporting quad's error estimate.
+- **4 or more dimensions:** Genz separation of variables on scrambled Sobol points, seeded by `rng_seed`, reporting the standard error.
+- The constructor checks that the correlation matrix is positive semi-definite. `corr=float` builds an equicorrelation matrix (default 0, independence).
 
 `GaussianCopula(marginals: Sequence[scipy.stats frozen dist], corr)` computes a box probability through the copula CDF, using inclusion–exclusion over 2^d corners.
 
@@ -337,7 +340,7 @@ Every stage ends with green `pytest` on `test_and_checks/` and one runnable scri
 
 ## 8. Open unknowns (to resolve inside the named stage)
 
-- **U1 (Stage 2):** which deterministic algorithm is used for 2D/3D box probabilities, and the accuracy it can prove. The candidates are SciPy with a tight `abseps`, or a dedicated bivariate/trivariate routine.
+- **U1 (Stage 2), resolved 2026-10-21:** 2D uses a vectorised port of Genz's BVNU (error 4e-15 per box). 3D integrates the conditional bivariate box by adaptive quadrature (quad's error estimate, typically 1e-14). Both are verified against closed-form orthant probabilities and independent quadrature oracles. SciPy's `multivariate_normal.cdf` was rejected because it is randomised QMC in every dimension. See [ADR 0003](adr/0003-gaussian-box-probability-algorithms.md).
 - **U2 (Stage 1), resolved 2026-10-18:** production cost = PC + Sr + Rw per part started (p. 101: "Production cost is E(PR) − SP f_{I,C}", printed without the sign flip). It is not per conforming part, which would give μ = 10.33. Minimising it reproduces R2 (10.0875) and R4 (46.7530 @ [10.128, 15.181]). Tables 3.11/3.13 report Sr + Rw without PC (D12), so the engine reports PC, Sr and Rw separately and tests compare the matching sum.
 - **U3 (Stage 3), resolved 2026-10-17:** Inspection Cost is a flat IC_stage + IC_feature·N per Stage, summed over the Sequence and subtracted from E(PR) per part started (thesis pp. 108–110: "an inspection process is implicit after each stage… a cost of 0.5 units with a further 0.5 units for each feature inspected"). Table 3.9's I column matches this for Seqs 1–7. Seq 8 is a misprint (D10).
 - **U4 (Stage 4), resolved 2026-10-17:** R6/R7 confirmed visually and reproduced by a throwaway calculation once σ=2 and SP=400 are used (D11).

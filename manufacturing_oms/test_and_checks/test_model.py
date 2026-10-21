@@ -101,6 +101,25 @@ class TestCostTable:
         with pytest.raises(TypeError):
             costs().scrap[I] = 0.0  # type: ignore[index]
 
+    def test_additive_sums_rework_over_the_group_and_scrap_over_the_stage(self):
+        features = (
+            Feature("a", lower=0.0, upper=1.0, rework_side=ReworkSide.UPPER),
+            Feature("b", lower=0.0, upper=1.0, rework_side=ReworkSide.NONE),
+            Feature("c", lower=0.0, upper=1.0, rework_side=ReworkSide.LOWER),
+        )
+        table = CostTable.additive(
+            5.0, rework_per_feature={"a": 1.0, "c": 2.0}, scrap_per_feature={"a": 1.0, "b": 2.0, "c": 4.0}
+        )
+        a, c, ac = frozenset({"a"}), frozenset({"c"}), frozenset({"a", "c"})
+        assert table.processing == 5.0
+        assert table.rework == {a: 1.0, c: 2.0, ac: 3.0}
+        assert table.scrap == {I: 7.0, a: 7.0, c: 7.0, ac: 7.0}
+        Stage(features=features, variation=MultivariateNormal([1.0, 1.0, 1.0]), costs=table)  # keys fit the Stage
+
+    def test_additive_rework_needs_a_scrap_cost_for_the_same_feature(self):
+        with pytest.raises(ValueError, match="scrap"):
+            CostTable.additive(5.0, rework_per_feature={"a": 1.0}, scrap_per_feature={"b": 1.0})
+
 
 class TestMeanSettings:
     def test_per_feature_uses_one_mean_in_every_state(self):

@@ -35,8 +35,11 @@ class StateTransitions:
         object.__setattr__(self, "rework", MappingProxyType(dict(self.rework)))
 
 
-def stage_transitions(stage: Stage, means: MeanSettings) -> dict[State, StateTransitions]:
-    """Box probabilities of each state's draw, from the marginal distribution of the Features it processes."""
+def stage_transitions(stage: Stage, means: MeanSettings, *, rng_seed: int = 0) -> dict[State, StateTransitions]:
+    """Box probabilities of each state's draw, from the marginal distribution of the Features it processes.
+
+    Every box is computed with the same `rng_seed`, so Monte Carlo boxes share their random numbers.
+    """
     by_name = {f.name: (i, f) for i, f in enumerate(stage.features)}
     result = {}
     for state in stage.states:
@@ -44,15 +47,16 @@ def stage_transitions(stage: Stage, means: MeanSettings) -> dict[State, StateTra
         indices = [by_name[n][0] for n in drawn]
         features = [by_name[n][1] for n in drawn]
         mu = [means.by_state[state][n] for n in drawn]
-        result[state] = _draw_transitions(features, stage.variation.marginal(indices), mu)
+        result[state] = _draw_transitions(features, stage.variation.marginal(indices), mu, rng_seed)
     return result
 
 
 def _draw_transitions(
-    features: Sequence[Feature], variation: JointDistribution, mu: Sequence[float]
+    features: Sequence[Feature], variation: JointDistribution, mu: Sequence[float], rng_seed: int
 ) -> StateTransitions:
     def box(intervals: Sequence[Interval]) -> Probability:
-        return variation.box_probability(mu, [lo for lo, _ in intervals], [hi for _, hi in intervals])
+        lower, upper = [lo for lo, _ in intervals], [hi for _, hi in intervals]
+        return variation.box_probability(mu, lower, upper, rng_seed=rng_seed)
 
     within_limits = [(f.lower, f.upper) for f in features]
     rework = {
