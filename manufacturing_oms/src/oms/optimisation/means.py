@@ -1,4 +1,4 @@
-"""Optimising Mean Settings (spec §5.4). Stage 1 covers one Stage under the per_feature tying scheme."""
+"""Optimising the Mean Settings of a Sequence (spec §5.4) under the per_feature tying scheme."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from typing import Literal
 import numpy as np
 from scipy.optimize import minimize
 
-from oms.economics.stage import StageResult, evaluate_stage
+from oms.economics.sequence import ProfitBreakdown, evaluate_sequence
 from oms.model.means import MeanSettings
-from oms.model.stage import Stage
+from oms.model.sequence import Sequence
 
 Scheme = Literal["per_feature"]
 Objective = Literal["expected_profit", "production_cost"]
@@ -24,8 +24,8 @@ Bounds = Mapping[str, tuple[float, float]]
 class OptimisationResult:
     """The best Mean Settings found, the objective there, and everything needed to reproduce the search."""
 
-    means: MeanSettings
-    stage_result: StageResult
+    means: tuple[MeanSettings, ...]  # one per Stage
+    breakdown: ProfitBreakdown
     objective: Objective
     objective_value: float  # Expected Profit (maximised) or Processing + Scrap + Rework Cost (minimised)
     scheme: Scheme
@@ -38,58 +38,70 @@ class OptimisationResult:
     success: bool
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "means", tuple(self.means))
         object.__setattr__(self, "bounds", MappingProxyType(dict(self.bounds)))
 
 
 def optimise_means(
-    stage: Stage,
-    selling_price: float,
+    sequence: Sequence,
     scheme: Scheme = "per_feature",
     *,
     objective: Objective = "expected_profit",
     bounds: Bounds | None = None,
     n_starts: int = 8,
     seed: int = 0,
-    method: OptimiserMethod = "L-BFGS-B",
+    method: OptimiserMethod | None = None,
     tol: float = 1e-9,
 ) -> OptimisationResult:
-    """Maximise single-Stage Expected Profit, or minimise Processing + Scrap + Rework Cost (U2).
+    """Maximise Sequence Expected Profit, or minimise Processing + Scrap + Rework Cost (U2).
 
-    Default bounds are [L − 3σ, U + 3σ] per Feature. Start points are drawn uniformly within the
-    bounds from a generator seeded with `seed`, so the same seed gives the same result.
+    Default bounds are [L − 3σ, U + 3σ] per Feature. Start points are drawn uniformly within the bounds
+    from a generator seeded with `seed`, and `seed` also seeds every Monte Carlo box probability, so the
+    same seed gives the same result. With no `method`, L-BFGS-B is used unless the objective contains
+    Monte Carlo terms (Stages of 4 or more correlated Features), when bounded Nelder–Mead is used; that
+    probe evaluation is counted. Inspection Cost doesn't depend on the Mean Settings, so maximising E(PR)
+    also maximises E(PR) − I (spec §2.2).
     """
     if scheme != "per_feature":
-        raise ValueError(f"unsupported tying scheme {scheme!r}; Stage 1 provides 'per_feature' only")
+        raise ValueError(f"unsupported tying scheme {scheme!r}; only 'per_feature' is supported")
     if objective not in ("expected_profit", "production_cost"):
         raise ValueError(f"unknown objective {objective!r}")
-    if method not in ("L-BFGS-B", "Nelder-Mead"):
+    if method not in (None, "L-BFGS-B", "Nelder-Mead"):
         raise ValueError(f"unsupported optimiser {method!r}")
     if n_starts < 1:
         raise ValueError("n_starts must be at least 1")
-    names = stage.feature_names
-    bounds_by_feature = dict(bounds) if bounds is not None else _default_bounds(stage)
+    names = [name for stage in sequence.stages for name in stage.feature_names]
+    bounds_by_feature = dict(bounds) if bounds is not None else _default_bounds(sequence)
     if set(bounds_by_feature) != set(names):
         raise ValueError(f"bounds must be given for exactly {names}")
     limits = [bounds_by_feature[n] for n in names]
 
-    def expand(theta: np.ndarray) -> MeanSettings:
-        return MeanSettings.per_feature(stage, dict(zip(names, map(float, theta))))
+    def expand(theta: np.ndarray) -> tuple[MeanSettings, ...]:
+        mu = dict(zip(names, map(float, theta)))
+        return tuple(
+            MeanSettings.per_feature(stage, {n: mu[n] for n in stage.feature_names}) for stage in sequence.stages
+        )
 
-    def value(result: StageResult) -> float:
-        if objective == "expected_profit":
-            return result.expected_profit(selling_price)
-        return result.production_cost
+    def evaluate(theta: np.ndarray) -> ProfitBreakdown:
+        return evaluate_sequence(sequence, expand(theta), rng_seed=seed)
+
+    def value(breakdown: ProfitBreakdown) -> float:
+        return breakdown.expected_profit if objective == "expected_profit" else breakdown.production_cost
 
     sign = -1.0 if objective == "expected_profit" else 1.0
 
     def loss(theta: np.ndarray) -> float:
-        return sign * value(evaluate_stage(stage, expand(theta)))
+        return sign * value(evaluate(theta))
 
     rng = np.random.default_rng(seed)
     lows, highs = np.array(limits).T
-    best = None
+    starts = rng.uniform(lows, highs, size=(n_starts, len(names)))
     n_evaluations = 0
-    for start in rng.uniform(lows, highs, size=(n_starts, len(names))):
+    if method is None:
+        method = "Nelder-Mead" if _has_monte_carlo_terms(evaluate(starts[0])) else "L-BFGS-B"
+        n_evaluations += 1
+    best = None
+    for start in starts:
         if method == "L-BFGS-B":
             run = minimize(loss, start, method="L-BFGS-B", bounds=limits, options={"ftol": tol, "gtol": tol})
         else:
@@ -98,13 +110,12 @@ def optimise_means(
         if best is None or run.fun < best.fun:
             best = run
     assert best is not None
-    means = expand(best.x)
-    stage_result = evaluate_stage(stage, means)
+    breakdown = evaluate(best.x)
     return OptimisationResult(
-        means=means,
-        stage_result=stage_result,
+        means=expand(best.x),
+        breakdown=breakdown,
         objective=objective,
-        objective_value=value(stage_result),
+        objective_value=value(breakdown),
         scheme=scheme,
         bounds=bounds_by_feature,
         method=method,
@@ -116,6 +127,13 @@ def optimise_means(
     )
 
 
-def _default_bounds(stage: Stage) -> dict[str, tuple[float, float]]:
-    sigmas = stage.variation.standard_deviations
-    return {f.name: (f.lower - 3 * s, f.upper + 3 * s) for f, s in zip(stage.features, sigmas)}
+def _default_bounds(sequence: Sequence) -> dict[str, tuple[float, float]]:
+    return {
+        f.name: (f.lower - 3 * s, f.upper + 3 * s)
+        for stage in sequence.stages
+        for f, s in zip(stage.features, stage.variation.standard_deviations)
+    }
+
+
+def _has_monte_carlo_terms(breakdown: ProfitBreakdown) -> bool:
+    return any("monte_carlo" in stage.methods for stage in breakdown.stages)

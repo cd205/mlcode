@@ -1,6 +1,6 @@
 # OMS Python Reconstruction: Analysis & Implementation Spec
 
-Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is complete: multi-Feature Gaussian evaluation (#4), U1 (ADR 0003), the Eq 3.59 and KB 2008 oracles (#5), and the multi-Feature transition oracles (#6, discrepancies D15 and D16). Stage 3 is complete: Sequences, Inspection Cost and the `Costs_MultiStage_MultiFeature` oracle (#7).
+Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is complete: multi-Feature Gaussian evaluation (#4), U1 (ADR 0003), the Eq 3.59 and KB 2008 oracles (#5), and the multi-Feature transition oracles (#6, discrepancies D15 and D16). Stage 3 is complete: Sequences, Inspection Cost and the `Costs_MultiStage_MultiFeature` oracle (#7). Stage 4 is under way: `optimise_means` over a Sequence with the `per_feature` scheme recovers the R2–R5 optima (#8).
 
 This spec builds on:
 - [GLOSSARY.md](../GLOSSARY.md): the canonical terms. This document uses them exactly as defined there.
@@ -248,7 +248,7 @@ evaluate_sequence(seq, means: Sequence[MeanSettings], *, rng_seed=0) -> ProfitBr
 
 ```python
 optimise_means(seq, scheme: Literal["per_feature","per_group_size","per_state"],
-               *, bounds=None, n_starts=8, seed=0, method="L-BFGS-B", tol=1e-9) -> OptimisationResult
+               *, objective="expected_profit", bounds=None, n_starts=8, seed=0, method=None, tol=1e-9) -> OptimisationResult
 search_sequences(features_in_order, stage_builder, selling_price, scheme, **opt_kwargs) -> list[SequenceResult]
     # enumerates all 2^(N−1) Inspection placements, optimises each, ranks by E(PR)
 ```
@@ -257,7 +257,8 @@ search_sequences(features_in_order, stage_builder, selling_price, scheme, **opt_
 - Multi-start points are seeded.
 - The method, tolerances, number of evaluations and seed are recorded in the result.
 - Bounded Nelder–Mead is used when the objective contains Monte Carlo terms.
-- Stage 1 provides the single-Stage form `optimise_means(stage, selling_price, scheme="per_feature", *, objective="expected_profit" | "production_cost", ...)`, because `Sequence` arrives in Stage 3. Stage 4 generalises it to the Sequence signature above.
+- `objective="expected_profit" | "production_cost"` chooses between maximising E(PR) and minimising Processing + Scrap + Rework Cost (U2). A one-Stage problem is a one-Stage Sequence, which carries the Selling Price.
+- `method=None` (the default) means L-BFGS-B, unless the objective has Monte Carlo terms at the first start point, when bounded Nelder–Mead is used. `seed` seeds both the start points and every Monte Carlo box probability, so the objective is deterministic.
 
 ## 6. Reference cases & acceptance criteria
 

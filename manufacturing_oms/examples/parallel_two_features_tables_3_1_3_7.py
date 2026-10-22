@@ -1,10 +1,20 @@
 """Reference cases R3 and R4 (thesis Tables 3.1 and 3.7): two Features in one Parallel Stage, Rework Side above U.
 
-Evaluates each at the printed Mean Settings. Optimising across Sequences arrives with #8.
+Evaluates each at the printed Mean Settings, then optimises the per_feature Mean Settings from scratch.
 Run from manufacturing_oms/ with:  uv run python examples/parallel_two_features_tables_3_1_3_7.py
 """
 
-from oms import CostTable, Feature, MeanSettings, MultivariateNormal, ReworkSide, Stage, evaluate_stage
+from oms import (
+    CostTable,
+    Feature,
+    MeanSettings,
+    MultivariateNormal,
+    ReworkSide,
+    Sequence,
+    Stage,
+    evaluate_stage,
+    optimise_means,
+)
 
 SELLING_PRICE = 120.0
 I, A, B, AB = frozenset(), frozenset({"a"}), frozenset({"b"}), frozenset({"a", "b"})
@@ -44,3 +54,20 @@ def report(title, stage, mu, printed):
 report("R3, Table 3.1", table_3_1, {"a": 10.5115, "b": 15.5651}, "E(PR) = 71.4287")
 report("R4, Table 3.7, profit optimum", table_3_7, {"a": 10.537, "b": 15.590}, "E(PR) = 71.17")
 report("R4, Table 3.7, cost minimum", table_3_7, {"a": 10.128, "b": 15.181}, "production cost = 46.753")
+
+
+def report_optimum(title, stage, printed, objective="expected_profit"):
+    result = optimise_means(Sequence(stages=(stage,), selling_price=SELLING_PRICE), objective=objective)
+    mu = result.means[0].by_state[I]
+    b = result.breakdown
+    print(f"{title}  (thesis: {printed})")
+    print(f"  Mean Settings         [{mu['a']:.4f}, {mu['b']:.4f}]")
+    print(f"  Expected Profit       {b.expected_profit:.4f}")
+    print(f"  Production cost       {b.production_cost:.4f}")
+    print(f"  [{result.method}, {result.n_starts} starts, seed {result.seed}, {result.n_evaluations} evaluations]")
+    print()
+
+
+report_optimum("R3, Table 3.1, optimised", table_3_1, "71.4287 @ [10.5115, 15.5651]")
+report_optimum("R4, Table 3.7, optimised", table_3_7, "71.17 @ [10.537, 15.590]")
+report_optimum("R4, Table 3.7, cost minimised", table_3_7, "46.753 @ [10.128, 15.181]", objective="production_cost")
