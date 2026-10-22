@@ -3,7 +3,7 @@
 from oms.distributions import MultivariateNormal, Probability
 from oms.economics import ProfitBreakdown, StageResult, evaluate_sequence, evaluate_stage
 from oms.model import CostTable, Feature, InspectionCost, MeanSettings, ReworkSide, Sequence, Stage
-from oms.optimisation import OptimisationResult, optimise_means
+from oms.optimisation import OptimisationResult, SequenceResult, StageBuilder, optimise_means, search_sequences
 
 __all__ = [
     "CostTable",
@@ -16,9 +16,12 @@ __all__ = [
     "ProfitBreakdown",
     "ReworkSide",
     "Sequence",
+    "SequenceResult",
     "Stage",
+    "StageBuilder",
     "StageResult",
     "evaluate_sequence",
     "evaluate_stage",
     "optimise_means",
+    "search_sequences",
 ]
