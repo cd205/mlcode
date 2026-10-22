@@ -1,6 +1,6 @@
 """Optimal Mean Setting for multi-feature manufacturing with rework and scrap."""
 
-from oms.distributions import MultivariateNormal, Probability
+from oms.distributions import GaussianCopula, MultivariateNormal, Probability
 from oms.economics import ProfitBreakdown, StageResult, evaluate_sequence, evaluate_stage
 from oms.model import CostTable, Feature, InspectionCost, MeanSettings, ReworkSide, Sequence, Stage
 from oms.optimisation import OptimisationResult, SequenceResult, StageBuilder, optimise_means, search_sequences
@@ -8,6 +8,7 @@ from oms.optimisation import OptimisationResult, SequenceResult, StageBuilder, o
 __all__ = [
     "CostTable",
     "Feature",
+    "GaussianCopula",
     "InspectionCost",
     "MeanSettings",
     "MultivariateNormal",

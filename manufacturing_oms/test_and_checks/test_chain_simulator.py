@@ -22,6 +22,7 @@ from oms import (
     evaluate_sequence,
 )
 from oracles import stage_cost_fun
+from test_connecting_rod_copula import PRINTED_MEANS, connecting_rod
 
 I = frozenset()
 N_PARTS = 200_000
@@ -281,3 +282,9 @@ TABLE_3_9 = [
 def test_r8_sequences(groups, mu):
     sequence = r8(groups)
     assert_sequence_agrees(sequence, per_feature(sequence, *mu))
+
+
+def test_r9_connecting_rod_copula():
+    """Non-Gaussian Process Variation: a Normal and a heavy-tailed t Feature joined by a Gaussian copula (D6)."""
+    sequence = connecting_rod()
+    assert_sequence_agrees(sequence, [MeanSettings.per_group_size(sequence.stages[0], PRINTED_MEANS)])

@@ -234,7 +234,7 @@ The `MultivariateNormal(sigmas, corr)` implementation ([ADR 0003](adr/0003-gauss
 - **4 or more dimensions:** Genz separation of variables on scrambled Sobol points, seeded by `rng_seed`, reporting the standard error.
 - The constructor checks that the correlation matrix is positive semi-definite. `corr=float` builds an equicorrelation matrix (default 0, independence).
 
-`GaussianCopula(marginals: Sequence[scipy.stats frozen dist], corr)` computes a box probability through the copula CDF, using inclusion–exclusion over 2^d corners.
+`GaussianCopula(marginals: Sequence[scipy.stats frozen dist], corr)` computes a box probability through the copula CDF. Inclusion–exclusion over the 2^d corners equals the standard Gaussian box between the limits' normal scores, so it is computed that way, by the ADR 0003 algorithms. Marginals are centred on 0 and the Mean Setting is added to their draw ([ADR 0004](adr/0004-gaussian-copula-box-via-normal-scores.md)).
 
 ### 5.3 Evaluation
 
@@ -280,7 +280,7 @@ search_sequences(features_in_order, stage_builder, selling_price, scheme, **opt_
 | R6 | Tables 3.10/3.11 `per_feature` vs `per_group_size` (visually confirmed 2026-10-17) | U=6, L=4, **σ=2** (not σ²=2), **SP=400** (not the printed 500, D11), PC=50, RC={1}:25, {2}:25, {1,2}:50, SC=150, Rework Side above U. Case II order: (μ₁,₁, μ₁,₂) = dual-feature means (I and {1,2}); (μ₂,₁, μ₂,₂) = single-feature rework means | 40.87 @ [6.85, 6.85]; 41.66 @ [6.75, 6.75, 7.02, 7.02]; f_C 0.5933/0.5935; production cost (Sr+Rw) 146.44/145.75 | 40.8747 @ 6.851; 41.6581 @ [6.748, 7.022]; Sr+Rw 146.44/145.75 ✓ |
 | R7 | Table 3.13 correlated (visually confirmed 2026-10-17) | as R6 with ρ = ±0.8 | ρ=0.8: 56.4038 @ 6.65 / 58.3309 @ [6.52, 7.02]; Sr+Rw 140.24/138.93; f_C 0.6166/0.6181. ρ=−0.8: 45.11 @ 6.80 / 47.10 @ [6.57, 7.02]; Sr+Rw 139.65/136.60; f_C 0.5869/0.5842 | all ✓ (56.4038, 58.3309, 45.1141, 47.0993) |
 | R8 | Tables 3.8/3.9 and Fig 3.27 Sequences, 4 Features (inputs visually confirmed 2026-10-17) | SP=120, PC=[25,20,12,15], RC=[15,12,8,10], SC=[10,17,5,12], L=[8,13,10,7], U=[12,17,14,11], σ=1, IC=0.5+0.5/Feature | e.g. Seq 1 41.7523; Seq 8 40.8657 | – (expect small N≥3 gap, ADR 0001). Engine 2026-10-22: Seqs 1–5 ✓; Seqs 6–8 lower by 3e-5 to 2.2e-4, closed by the Eq 3.59 oracle (D1) |
-| R9 | Tables 4.1/4.3 connecting rod, copula (Stage 7; D6) | Units cm: L=[6.9, 3.925], U=[7.1, 4.075]; x₁ Normal σ=0.1362; x₂ tLocation-Scale scale 0.0527, ν=2.2522; Gaussian copula ρ=0.7052; Rework Side below L; SP=100, PC=20, RC={1}:5, {2}:5, {1,2}:10, SC=50; `per_group_size` | 44.47 @ [6.8737, 3.9514, 6.8441, 3.9486] | 44.4708 @ printed means ✓ |
+| R9 | Tables 4.1/4.3 connecting rod, copula (Stage 7; D6) | Units cm: L=[6.9, 3.925], U=[7.1, 4.075]; x₁ Normal σ=0.1362; x₂ tLocation-Scale scale 0.0527, ν=2.2522; Gaussian copula ρ=0.7052; Rework Side below L; SP=100, PC=20, RC={1}:5, {2}:5, {1,2}:10, SC=50; `per_group_size` | 44.47 @ [6.8737, 3.9514, 6.8441, 3.9486] | 44.4708 @ printed means ✓. Engine 2026-10-22: ✓, and `per_group_size` optimum 44.4708 within 5e-5 cm of the printed means (D6) |
 
 **Oracle tests** (ports of MATLAB, `test_and_checks/oracles/`):
 - Eq 3.59 S∘D scrap must equal the engine exactly for N ≤ 2. For N = 3 and 4 the gap is recorded and shown to be negative.

@@ -8,13 +8,15 @@ and scrap, and the estimates are plain sample means over parts, each with its st
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from collections.abc import Sequence as Seq
 from dataclasses import dataclass
 from itertools import combinations
 
 import numpy as np
+from scipy.special import ndtr
 
-from oms import MeanSettings, MultivariateNormal, ReworkSide, Sequence, Stage
+from oms import GaussianCopula, MeanSettings, MultivariateNormal, ReworkSide, Sequence, Stage
 
 State = frozenset[str]
 MAX_ROUNDS = 100_000  # Inspections of one part in one Stage before the simulation gives up
@@ -81,8 +83,7 @@ def _simulate_stage(
 
     Returns the Stage's estimates, which parts conformed, and each part's cost in this Stage.
     """
-    if not isinstance(stage.variation, MultivariateNormal):
-        raise TypeError("the simulator draws Gaussian Process Variation only")
+    draw = _sampler(stage)
     names = stage.feature_names
     # Enumerated here rather than taken from the engine: the Initial State, then every non-empty subset of
     # the reworkable Features, the only sets a draw can send a part to rework.
@@ -92,8 +93,6 @@ def _simulate_stage(
     missing = [sorted(s) for s in states if s not in means.by_state]
     if missing:
         raise ValueError(f"no Mean Settings for states {missing}")
-    sigma = np.asarray(stage.variation.sigmas)
-    covariance = np.outer(sigma, sigma) * np.asarray(stage.variation.corr)
     lower = np.array([f.lower for f in stage.features])
     upper = np.array([f.upper for f in stage.features])
     reworks_above = np.array([f.rework_side is ReworkSide.UPPER for f in stage.features])
@@ -119,7 +118,7 @@ def _simulate_stage(
             # conforming (A3). The draw is fresh, from the marginal of the remade Features (A4, A7).
             cols = [i for i, name in enumerate(names) if not s or name in s]
             mu = np.array([means.by_state[s][names[i]] for i in cols])
-            x = _draw(covariance[np.ix_(cols, cols)], mu, parts.size, rng)
+            x = mu + draw(cols, parts.size, rng)
             above, below = x > upper[cols], x < lower[cols]
             on_rework_side = (above & reworks_above[cols]) | (below & reworks_below[cols])  # part × Feature
             # One Feature on its Scrap Side scraps the part (A2), whatever the others show.
@@ -146,9 +145,31 @@ def _simulate_stage(
     return result, conformed, stage.costs.processing + scrap_cost + rework_cost
 
 
-def _draw(covariance: np.ndarray, mu: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
-    """n draws from N(mu, covariance); an eigen factor allows the singular covariance of ±1 correlation."""
+Sampler = Callable[[list[int], int, np.random.Generator], np.ndarray]
+
+
+def _sampler(stage: Stage) -> Sampler:
+    """Draws of the deviations from the Mean Settings of the Features at `cols`, one row per part."""
+    variation = stage.variation
+    if isinstance(variation, MultivariateNormal):
+        sigma = np.asarray(variation.sigmas)
+        covariance = np.outer(sigma, sigma) * np.asarray(variation.corr)
+        return lambda cols, n, rng: _centred_normal(covariance[np.ix_(cols, cols)], n, rng)
+    if isinstance(variation, GaussianCopula):
+        corr, marginals = np.asarray(variation.corr), variation.marginals
+
+        def copula(cols: list[int], n: int, rng: np.random.Generator) -> np.ndarray:
+            # Correlated normal scores, sent through each marginal's quantile function.
+            z = _centred_normal(corr[np.ix_(cols, cols)], n, rng)
+            return np.column_stack([marginals[i].ppf(ndtr(z[:, j])) for j, i in enumerate(cols)])
+
+        return copula
+    raise TypeError(f"the simulator can't draw {type(variation).__name__} Process Variation")
+
+
+def _centred_normal(covariance: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
+    """n draws from N(0, covariance); an eigen factor allows the singular covariance of ±1 correlation."""
     w, v = np.linalg.eigh(covariance)
     factor = v * np.sqrt(np.clip(w, 0.0, None))
-    draws: np.ndarray = mu + rng.standard_normal((n, mu.size)) @ factor.T
+    draws: np.ndarray = rng.standard_normal((n, len(covariance))) @ factor.T
     return draws

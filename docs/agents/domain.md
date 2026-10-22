@@ -22,7 +22,8 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
     ├── docs/adr/
     │   ├── 0001-exact-absorbing-chain-scrap-cost.md
     │   ├── 0002-matlab-ports-are-test-oracles-only.md
-    │   └── 0003-gaussian-box-probability-algorithms.md
+    │   ├── 0003-gaussian-box-probability-algorithms.md
+    │   └── 0004-gaussian-copula-box-via-normal-scores.md
     └── src/oms/
 ```
 
