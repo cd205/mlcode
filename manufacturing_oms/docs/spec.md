@@ -1,6 +1,6 @@
 # OMS Python Reconstruction: Analysis & Implementation Spec
 
-Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is complete: multi-Feature Gaussian evaluation (#4), U1 (ADR 0003), the Eq 3.59 and KB 2008 oracles (#5), and the multi-Feature transition oracles (#6, discrepancies D15 and D16). Stage 3 is complete: Sequences, Inspection Cost and the `Costs_MultiStage_MultiFeature` oracle (#7). Stage 4 is complete: `optimise_means` over a Sequence with the `per_feature` scheme recovers the R2–R5 optima (#8), and the `per_group_size` scheme recovers R6 and R7, with the `StageCostFun_MultiMu` oracle matching through the D8 adapter (#9), and the new `per_state` scheme nests the other two on R6 (#10). Stage 5 is complete: `search_sequences` ranks all 8 R8 Sequences; Seqs 6–8 match Table 3.9 through the Eq 3.59 oracle (D1), with misprints D18 and D19 (#11). Stage 6 is complete: an independent Monte Carlo chain simulator (`test_and_checks/chain_simulator.py`) agrees with the engine's f_C, m_{I,j} and E(PR) within 4 standard errors on R1–R8 at the printed means, and rejects the Eq 3.59 scrap cost at N = 3 (#12). The optional `K_and_B_DualQualitySimulation` port is not done.
+Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is complete: multi-Feature Gaussian evaluation (#4), U1 (ADR 0003), the Eq 3.59 and KB 2008 oracles (#5), and the multi-Feature transition oracles (#6, discrepancies D15 and D16). Stage 3 is complete: Sequences, Inspection Cost and the `Costs_MultiStage_MultiFeature` oracle (#7). Stage 4 is complete: `optimise_means` over a Sequence with the `per_feature` scheme recovers the R2–R5 optima (#8), and the `per_group_size` scheme recovers R6 and R7, with the `StageCostFun_MultiMu` oracle matching through the D8 adapter (#9), and the new `per_state` scheme nests the other two on R6 (#10). Stage 5 is complete: `search_sequences` ranks all 8 R8 Sequences; Seqs 6–8 match Table 3.9 through the Eq 3.59 oracle (D1), with misprints D18 and D19 (#11). Stage 6 is complete: an independent Monte Carlo chain simulator (`test_and_checks/chain_simulator.py`) agrees with the engine's f_C, m_{I,j} and E(PR) within 4 standard errors on R1–R8 at the printed means, and rejects the Eq 3.59 scrap cost at N = 3 (#12). The optional `K_and_B_DualQualitySimulation` port, a second independent Monte Carlo, agrees with the engine's f_C, scrap probability and m_{I,j} and with the script's own `KandBMarkov_DualChars` column, except the mismatched `f45_AA` (D20) (#13).
 
 This spec builds on:
 - [GLOSSARY.md](../GLOSSARY.md): the canonical terms. This document uses them exactly as defined there.
@@ -122,7 +122,7 @@ This is a static scan of all 45 curated files. Identifiers that match any `.m` f
 | Third-party utility | `combinator` (Matt Fig, FEX) | Replaced by `itertools.combinations`. Its `cumsumall` MEX path is reached only for integer classes, so it is unreachable here. |
 | Application orchestration | `Costs_MultiStage_MultiFeature` (script), `ProdCostFun` | Multi-Stage Eq 3.78 driver. `ProdCostFun` is an earlier N≤3 cost function built on `Probs_1/2/3Var`. |
 | **Validation oracles** | `Probs_1Var`, `Probs_2Var`, `Probs_3Var`, `MarkovProcess_1_Var`, `MarkovProcess_2_Var`, `Markov_TriChars`, `KandBMarkov_DualChars`, `K_and_B_2008_Example`, `Fun_Norm_Markov_DualChars`, `Fun_CMC_Markov` | Hand-written chains for N = 1, 2, 3, plus the Khasawneh & Bowling 2008 literature formula (Table 3.1, "Case I" cost formula). |
-| Validation, incomplete | `K_and_B_DualQualitySimulation` | Monte Carlo simulation. Needs the root files `KandBSimulate.m` and `KandBSimulate_1Var.m`, which are **not curated**. A useful independent oracle. |
+| Validation oracles (Monte Carlo) | `K_and_B_DualQualitySimulation`, `KandBSimulate`, `KandBSimulate_1Var` | Monte Carlo simulation of the Khasawneh & Bowling two-Feature chain. `KandBSimulate*` were curated from the repo root for issue #13. |
 | Related, deferred (non-Gaussian / CMC) | `CostModel_Example1`, `CostModel_Norm_Example1`, `CostModel_CMC_Example1`, `Opt_CMC_3d_Example1`, `Opt_NORM_3d_Example1` | Three-Feature cost examples. `Opt_CMC_3d_Example1` uses `copulacdf` and needs the root file `Fun_Cut_Measure_Cut_pdf.m` (**not curated**). Revisit in Stage 7 of the plan. |
 | **Unrelated** | `validation/Example1` | A Kriging/Branin/GA demo (reaches about 80 surrogate/sqplab files). Wrongly filed; leave it in place. |
 | Third-party optimisers | `fminsearchcon`, `ga`, `gaoptimset` (John D'Errico) | Not ported. SciPy replaces them. |
@@ -135,7 +135,8 @@ This is a static scan of all 45 curated files. Identifiers that match any `.m` f
 - **`nchoosek`, `factorial`:** combinatorics, standard library.
 - **`normcdf`:** **shadowed** by the root `normcdf.m` (Minka lightspeed, erf-based). It is numerically equivalent for `normcdf(x, m, s)`, so it does no harm, but it is recorded here.
 - **`copulacdf`, `quad`:** only in the deferred CMC examples.
-- **Missing from the curated folder:** `KandBSimulate.m`, `KandBSimulate_1Var.m` and `Fun_Cut_Measure_Cut_pdf.m`. They are at the repo root. Copy them into `legacy_matlab/validation/` when they become needed; never edit the originals.
+- **`mvnrnd`, `normrnd`:** only in the `K_and_B_DualQualitySimulation` port, which draws from a seeded NumPy `Generator` instead (MATLAB's stream can't be reproduced).
+- **Missing from the curated folder:** `Fun_Cut_Measure_Cut_pdf.m` (`KandBSimulate.m` and `KandBSimulate_1Var.m` were copied in for #13). It is at the repo root. Copy it into `legacy_matlab/validation/` when they become needed; never edit the originals.
 
 ## 4. Existing vs new capability
 
@@ -333,7 +334,7 @@ Every stage ends with green `pytest` on `test_and_checks/` and one runnable scri
 - *Exit:* R8, all 8 Sequences. Any difference beyond the printed precision for Stages with 3 or more Features must be explained by the ADR 0001 gap. Show this by also running the Eq 3.59 oracle.
 
 **Stage 6: Monte Carlo validation harness.**
-- An independent chain simulator for cross-checking every R-case. Optionally port `K_and_B_DualQualitySimulation` once its missing files are curated.
+- An independent chain simulator for cross-checking every R-case. Optionally port `K_and_B_DualQualitySimulation` once its missing files are curated (done, #13).
 
 **Stage 7: Non-Gaussian distributions.**
 - `GaussianCopula` + SciPy marginals. Clayton and Frank when the connecting-rod case (Sec. 4.3) is taken on.

@@ -8,6 +8,10 @@ from oracles.costs_multi_stage_multi_feature import (
     costs_multi_stage_multi_feature,
 )
 from oracles.fun_cmc_markov import FunCMCMarkovOutput, fun_cmc_markov
+from oracles.k_and_b_dual_quality_simulation import (
+    KAndBDualQualitySimulationOutput,
+    k_and_b_dual_quality_simulation,
+)
 from oracles.kandb_markov_dual_chars import (
     KAndB2008ExampleOutput,
     KandBMarkovDualCharsOutput,
@@ -36,6 +40,7 @@ __all__ = [
     "CostsMultiStageMultiFeatureOutput",
     "FunCMCMarkovOutput",
     "KAndB2008ExampleOutput",
+    "KAndBDualQualitySimulationOutput",
     "KandBMarkovDualCharsOutput",
     "MarkovProcess1VarOutput",
     "MarkovProcess2VarOutput",
@@ -45,6 +50,7 @@ __all__ = [
     "costs_multi_stage_multi_feature",
     "fun_cmc_markov",
     "k_and_b_2008_example",
+    "k_and_b_dual_quality_simulation",
     "kandb_markov_dual_chars",
     "markov_process_1_var",
     "markov_process_2_var",
