@@ -1,6 +1,6 @@
 # OMS Python Reconstruction: Analysis & Implementation Spec
 
-Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is complete: multi-Feature Gaussian evaluation (#4), U1 (ADR 0003), the Eq 3.59 and KB 2008 oracles (#5), and the multi-Feature transition oracles (#6, discrepancies D15 and D16). Stage 3 is complete: Sequences, Inspection Cost and the `Costs_MultiStage_MultiFeature` oracle (#7). Stage 4 is under way: `optimise_means` over a Sequence with the `per_feature` scheme recovers the R2–R5 optima (#8).
+Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is complete: multi-Feature Gaussian evaluation (#4), U1 (ADR 0003), the Eq 3.59 and KB 2008 oracles (#5), and the multi-Feature transition oracles (#6, discrepancies D15 and D16). Stage 3 is complete: Sequences, Inspection Cost and the `Costs_MultiStage_MultiFeature` oracle (#7). Stage 4 is under way: `optimise_means` over a Sequence with the `per_feature` scheme recovers the R2–R5 optima (#8), and the `per_group_size` scheme recovers R6 and R7, with the `StageCostFun_MultiMu` oracle matching through the D8 adapter (#9).
 
 This spec builds on:
 - [GLOSSARY.md](../GLOSSARY.md): the canonical terms. This document uses them exactly as defined there.
@@ -94,7 +94,7 @@ The model stores one Mean Setting for each transient state: a vector over that s
 | Scheme | Free parameters | Thesis name |
 |---|---|---|
 | `per_feature` | one μ per Feature, used for every state | Case I (Sec. 3.5) |
-| `per_group_size` | one μ per Feature per Rework Group Size k. The Rework State {1..N} shares I's means. | Case II (Eq 3.26–3.27) |
+| `per_group_size` | one μ per Feature per Rework Group Size k. The Rework State {1..N} shares I's means. When a Feature's Rework Side is `none`, the group sizes below N cover only the reworkable Features, and the largest Rework State has its own means. | Case II (Eq 3.26–3.27) |
 | `per_state` | one μ per Feature per state, N·2^(N−1) + N | new |
 
 ⚠ The thesis uses "Case I/II" for two different things: mean schemes in Sec. 3.5, and *cost formulas* in Table 3.1. See D7 in [discrepancies.md](discrepancies.md). The code never uses the words "Case I/II".

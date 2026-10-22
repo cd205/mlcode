@@ -15,6 +15,7 @@ from oms import (
     Stage,
     evaluate_sequence,
 )
+from oms.model import group_size_features
 
 I = frozenset()
 X = frozenset({"x"})
@@ -37,6 +38,23 @@ def stage(feature=None, cost_table=None):
         features=(feature or x_feature(),),
         variation=MultivariateNormal([1.0]),
         costs=cost_table or costs(),
+    )
+
+
+def three_feature_stage(c_side=ReworkSide.UPPER):
+    features = tuple(
+        Feature(n, lower=8.0, upper=12.0, rework_side=side)
+        for n, side in (("a", ReworkSide.UPPER), ("b", ReworkSide.UPPER), ("c", c_side))
+    )
+    reworkable = [f.name for f in features if f.reworkable]
+    return Stage(
+        features=features,
+        variation=MultivariateNormal([1.0] * 3),
+        costs=CostTable.additive(
+            processing=1.0,
+            rework_per_feature={n: 1.0 for n in reworkable},
+            scrap_per_feature={"a": 1.0, "b": 1.0, "c": 1.0},
+        ),
     )
 
 
@@ -139,6 +157,47 @@ class TestMeanSettings:
     def test_per_feature_needs_exactly_the_stage_features(self):
         with pytest.raises(ValueError):
             MeanSettings.per_feature(stage(), {"y": 10.5})
+
+    def test_per_group_size_uses_the_means_of_each_rework_group_size(self):
+        means = MeanSettings.per_group_size(
+            three_feature_stage(),
+            {3: {"a": 1.0, "b": 2.0, "c": 3.0}, 1: {"a": 4.0, "b": 5.0, "c": 6.0}, 2: {"a": 7.0, "b": 8.0, "c": 9.0}},
+        )
+        assert means.by_state == {
+            I: {"a": 1.0, "b": 2.0, "c": 3.0},
+            frozenset("a"): {"a": 4.0},
+            frozenset("b"): {"b": 5.0},
+            frozenset("c"): {"c": 6.0},
+            frozenset("ab"): {"a": 7.0, "b": 8.0},
+            frozenset("ac"): {"a": 7.0, "c": 9.0},
+            frozenset("bc"): {"b": 8.0, "c": 9.0},
+            frozenset("abc"): {"a": 1.0, "b": 2.0, "c": 3.0},  # shares the Initial State's means
+        }
+
+    def test_per_group_size_with_a_feature_never_reworked(self):
+        # c has Rework Side none, so the largest Rework State is {a, b} and group sizes 1 and 2 omit c.
+        stage = three_feature_stage(c_side=ReworkSide.NONE)
+        assert group_size_features(stage) == {3: ("a", "b", "c"), 1: ("a", "b"), 2: ("a", "b")}
+        means = MeanSettings.per_group_size(
+            stage, {3: {"a": 1.0, "b": 2.0, "c": 3.0}, 1: {"a": 4.0, "b": 5.0}, 2: {"a": 7.0, "b": 8.0}}
+        )
+        assert means.by_state[frozenset("ab")] == {"a": 7.0, "b": 8.0}
+        assert means.by_state[I] == {"a": 1.0, "b": 2.0, "c": 3.0}
+
+    @pytest.mark.parametrize(
+        "mu",
+        [
+            pytest.param({3: {"a": 1.0, "b": 2.0, "c": 3.0}, 1: {"a": 4.0, "b": 5.0, "c": 6.0}}, id="missing size"),
+            pytest.param(
+                {3: {"a": 1.0, "b": 2.0, "c": 3.0}, 1: {"a": 4.0, "b": 5.0, "c": 6.0}, 2: {"a": 7.0, "b": 8.0}},
+                id="missing feature",
+            ),
+            pytest.param({s: {"a": 1.0, "b": 2.0, "c": 3.0} for s in (1, 2, 3, 4)}, id="extra size"),
+        ],
+    )
+    def test_per_group_size_needs_exactly_the_stage_layout(self, mu):
+        with pytest.raises(ValueError):
+            MeanSettings.per_group_size(three_feature_stage(), mu)
 
     def test_mean_settings_are_read_only(self):
         means = MeanSettings.per_feature(stage(), {"x": 10.5})

@@ -1,4 +1,4 @@
-"""Optimising the Mean Settings of a Sequence (spec §5.4) under the per_feature tying scheme."""
+"""Optimising the Mean Settings of a Sequence (spec §5.4) under a tying scheme (spec §2.3)."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from scipy.optimize import minimize
 from oms.economics.sequence import ProfitBreakdown, evaluate_sequence
 from oms.model.means import MeanSettings
 from oms.model.sequence import Sequence
+from oms.optimisation.tying import Scheme, Tying
 
-Scheme = Literal["per_feature"]
 Objective = Literal["expected_profit", "production_cost"]
 OptimiserMethod = Literal["L-BFGS-B", "Nelder-Mead"]  # bounded Nelder–Mead for noisy (Monte Carlo) objectives
 Bounds = Mapping[str, tuple[float, float]]
@@ -55,15 +55,15 @@ def optimise_means(
 ) -> OptimisationResult:
     """Maximise Sequence Expected Profit, or minimise Processing + Scrap + Rework Cost (U2).
 
-    Default bounds are [L − 3σ, U + 3σ] per Feature. Start points are drawn uniformly within the bounds
-    from a generator seeded with `seed`, and `seed` also seeds every Monte Carlo box probability, so the
-    same seed gives the same result. With no `method`, L-BFGS-B is used unless the objective contains
-    Monte Carlo terms (Stages of 4 or more correlated Features), when bounded Nelder–Mead is used; that
-    probe evaluation is counted. Inspection Cost doesn't depend on the Mean Settings, so maximising E(PR)
+    `scheme` sets the free parameters (spec §2.3). Bounds are per Feature and apply to each of that
+    Feature's free parameters; the defaults are [L − 3σ, U + 3σ]. Start points are drawn uniformly within
+    the bounds from a generator seeded with `seed`, and `seed` also seeds every Monte Carlo box
+    probability, so the same seed gives the same result. With no `method`, L-BFGS-B is used unless the
+    objective contains Monte Carlo terms (Stages of 4 or more correlated Features), when bounded
+    Nelder–Mead is used; that probe evaluation is counted. Inspection Cost doesn't depend on the Mean Settings, so maximising E(PR)
     also maximises E(PR) − I (spec §2.2).
     """
-    if scheme != "per_feature":
-        raise ValueError(f"unsupported tying scheme {scheme!r}; only 'per_feature' is supported")
+    tying = Tying(sequence, scheme)
     if objective not in ("expected_profit", "production_cost"):
         raise ValueError(f"unknown objective {objective!r}")
     if method not in (None, "L-BFGS-B", "Nelder-Mead"):
@@ -74,16 +74,10 @@ def optimise_means(
     bounds_by_feature = dict(bounds) if bounds is not None else _default_bounds(sequence)
     if set(bounds_by_feature) != set(names):
         raise ValueError(f"bounds must be given for exactly {names}")
-    limits = [bounds_by_feature[n] for n in names]
-
-    def expand(theta: np.ndarray) -> tuple[MeanSettings, ...]:
-        mu = dict(zip(names, map(float, theta)))
-        return tuple(
-            MeanSettings.per_feature(stage, {n: mu[n] for n in stage.feature_names}) for stage in sequence.stages
-        )
+    limits = [bounds_by_feature[n] for n in tying.parameter_features]
 
     def evaluate(theta: np.ndarray) -> ProfitBreakdown:
-        return evaluate_sequence(sequence, expand(theta), rng_seed=seed)
+        return evaluate_sequence(sequence, tying.expand(theta), rng_seed=seed)
 
     def value(breakdown: ProfitBreakdown) -> float:
         return breakdown.expected_profit if objective == "expected_profit" else breakdown.production_cost
@@ -95,7 +89,7 @@ def optimise_means(
 
     rng = np.random.default_rng(seed)
     lows, highs = np.array(limits).T
-    starts = rng.uniform(lows, highs, size=(n_starts, len(names)))
+    starts = rng.uniform(lows, highs, size=(n_starts, len(limits)))
     n_evaluations = 0
     if method is None:
         method = "Nelder-Mead" if _has_monte_carlo_terms(evaluate(starts[0])) else "L-BFGS-B"
@@ -112,7 +106,7 @@ def optimise_means(
     assert best is not None
     breakdown = evaluate(best.x)
     return OptimisationResult(
-        means=expand(best.x),
+        means=tying.expand(best.x),
         breakdown=breakdown,
         objective=objective,
         objective_value=value(breakdown),

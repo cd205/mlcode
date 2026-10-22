@@ -20,7 +20,14 @@ from oracles.markov_tri_chars import MarkovTriCharsOutput, markov_tri_chars
 from oracles.probs_1var import probs_1var
 from oracles.probs_2var import probs_2var
 from oracles.probs_3var import probs_3var
-from oracles.stage_cost_fun import probs_n_vars, s_matrix_cell, stage_cost_fun
+from oracles.stage_cost_fun import (
+    per_group_size_from_mu_rows,
+    probs_n_vars,
+    probs_n_vars_multi_mu,
+    s_matrix_cell,
+    stage_cost_fun,
+    stage_cost_fun_multi_mu,
+)
 from oracles.stage_cost_fun_old import StageCostFunOldOutput, stage_cost_fun_old
 
 __all__ = [
@@ -42,11 +49,14 @@ __all__ = [
     "markov_process_1_var",
     "markov_process_2_var",
     "markov_tri_chars",
+    "per_group_size_from_mu_rows",
     "probs_1var",
     "probs_2var",
     "probs_3var",
     "probs_n_vars",
+    "probs_n_vars_multi_mu",
     "s_matrix_cell",
     "stage_cost_fun",
+    "stage_cost_fun_multi_mu",
     "stage_cost_fun_old",
 ]

@@ -35,6 +35,25 @@ class MeanSettings:
             raise ValueError(f"per_feature needs a mean for exactly {stage.feature_names}, got {sorted(mu)}")
         return cls({s: {n: mu[n] for n in processed_features(s, stage.features)} for s in stage.states})
 
+    @classmethod
+    def per_group_size(cls, stage: Stage, mu: Mapping[int, Mapping[str, float]]) -> MeanSettings:
+        """One Mean Setting per Feature per Rework Group Size (thesis Eq 3.26-3.27, Sec. 3.5).
+
+        A Rework State S uses `mu[len(S)]`. The Initial State processes every Feature, so it uses
+        `mu[N]`, as does the Rework State of all N Features. `group_size_features` gives the keys needed.
+        """
+        layout = group_size_features(stage)
+        if set(mu) != set(layout):
+            raise ValueError(
+                f"per_group_size needs means for exactly the group sizes {sorted(layout)}, got {sorted(mu)}"
+            )
+        for size, names in layout.items():
+            if set(mu[size]) != set(names):
+                raise ValueError(f"group size {size} needs a mean for exactly {list(names)}, got {sorted(mu[size])}")
+        return cls(
+            {s: {n: mu[_group_size(s, stage)][n] for n in processed_features(s, stage.features)} for s in stage.states}
+        )
+
     def check_against(self, stage: Stage) -> None:
         """Raise unless there is a mean for every Feature processed in every state of the Stage."""
         if set(self.by_state) != set(stage.states):
@@ -43,3 +62,20 @@ class MeanSettings:
             expected = set(processed_features(state, stage.features))
             if set(self.by_state[state]) != expected:
                 raise ValueError(f"state {sorted(state)} needs means for exactly {sorted(expected)}")
+
+
+def group_size_features(stage: Stage) -> dict[int, tuple[str, ...]]:
+    """The Features needing a Mean Setting at each Rework Group Size, in state then Feature order.
+
+    The Initial State processes all N Features, so it uses the group-size-N means. With a Rework Side of
+    `none` some Features never join a Rework State, so a smaller group size may need only some of them,
+    and the largest Rework State gets its own means rather than sharing the Initial State's.
+    """
+    layout: dict[int, set[str]] = {}
+    for state in stage.states:
+        layout.setdefault(_group_size(state, stage), set()).update(processed_features(state, stage.features))
+    return {size: tuple(n for n in stage.feature_names if n in names) for size, names in layout.items()}
+
+
+def _group_size(state: State, stage: Stage) -> int:
+    return len(processed_features(state, stage.features))

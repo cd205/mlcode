@@ -1,4 +1,5 @@
-"""Faithful ports of `legacy_matlab/core/StageCostFun.m`, `Probs_nVars.m`, `kSMatrix.m` and `kDMatrix.m`.
+"""Faithful ports of `legacy_matlab/core/StageCostFun.m`, `Probs_nVars.m`, `kSMatrix.m` and `kDMatrix.m`,
+and of their Mean-Setting-per-Rework-Group-Size variants `StageCostFun_MultiMu.m` and `Probs_nVars_MultiMu.m`.
 
 Test oracles only (ADR 0002). `StageCostFun`'s scrap loop is thesis Eq 3.59, the S∘D feed-in formula
 that the engine replaces with the exact absorbing-chain expectation (ADR 0001, D1).
@@ -8,6 +9,12 @@ where a Python list or array is indexed. `combinator(N, k, 'c')` is `itertools.c
 1..N, which yields the same lexicographic rows. The Rework Side is hard-coded above U, `rho` is a
 scalar equicorrelation and `sigs` are standard deviations. `PRR` keeps only the non-zero diagonal
 entries of Q, as the MATLAB does (D5).
+
+The `_MultiMu` files differ from the plain ones only where `Probs_nVars_MultiMu` reads the means of
+`Rw_vars` group j from row j of an N×N `MU`, `MU_R(j, RwIter(k,:))`, instead of from the one row. So
+the plain ports call the `_MultiMu` ports with `MU` repeated in every row. The rows are in `Rw_vars`
+order, [N-Feature; 1-Feature; 2-Feature; …; (N−1)-Feature] (D8); `per_group_size_from_mu_rows` maps
+them to the engine's `MeanSettings.per_group_size` keys.
 """
 
 from __future__ import annotations
@@ -80,20 +87,32 @@ def k_d_matrix(m, PIs, alpha, delta, eta):
     return DMat
 
 
+def per_group_size_from_mu_rows(MU, names):
+    """The D8 adapter: `_MultiMu` MU rows [N; 1; 2; …; N−1] as `MeanSettings.per_group_size` keys."""
+    N = len(names)
+    sizes = [N, *range(1, N)]
+    return {size: {n: float(mu) for n, mu in zip(names, row)} for size, row in zip(sizes, MU)}
+
+
 def probs_n_vars(MU, L, U, sigs, rho):
     """[PIs, PSs, PMat] = Probs_nVars(MU, L, U, sigs, rho)."""
-    MU, L, U, sigs = (np.asarray(a, dtype=float) for a in (MU, L, U, sigs))
-    MU_R = L + (U - MU)  # reverse the axes
+    return probs_n_vars_multi_mu(np.tile(np.asarray(MU, dtype=float), (len(MU), 1)), L, U, sigs, rho)
 
-    num_vars = len(MU)
+
+def probs_n_vars_multi_mu(MU, L, U, sigs, rho):
+    """[PIs, PSs, PMat] = Probs_nVars_MultiMu(MU, L, U, sigs, rho), MU an N×N matrix in D8 row order."""
+    MU, L, U, sigs = (np.asarray(a, dtype=float) for a in (MU, L, U, sigs))
+    MU_R = L + (U - MU)  # reverse the axes, row by row
+
+    num_vars = MU.shape[1]
     eta = number_of_transient_states(num_vars)
 
     Rw_vars = [combinator(num_vars, num_vars)] + [combinator(num_vars, i) for i in range(1, num_vars)]
     PCs, PSs, Pps = [], [], []
-    for RwIter in Rw_vars:
+    for j, RwIter in enumerate(Rw_vars):
         for row in RwIter:
             idx = [r - 1 for r in row]
-            MU_Ri = MU_R[idx]
+            MU_Ri = MU_R[j, idx]  # only the means of group j for the relevant features
             CorrMatrix = rho * np.ones((len(MU_Ri), len(MU_Ri)))
             np.fill_diagonal(CorrMatrix, 1)
             SIGMA = np.outer(sigs[idx], sigs[idx]) * CorrMatrix  # corr2cov
@@ -143,11 +162,16 @@ def stage_cost_fun(MU, sigs, rho, U, L, R_Cost, S_Cost):
 
     R_Cost has one entry per Rework State in UPv order; S_Cost has the Initial State first, then UPv.
     """
-    N = len(MU)
+    return stage_cost_fun_multi_mu(np.tile(np.asarray(MU, dtype=float), (len(MU), 1)), sigs, rho, U, L, R_Cost, S_Cost)
+
+
+def stage_cost_fun_multi_mu(MU, sigs, rho, U, L, R_Cost, S_Cost):
+    """[F_stageC, pIC, Rwi, Sri] = StageCostFun_MultiMu(MU, sigs, rho, U, L, R_Cost, S_Cost), MU in D8 row order."""
+    N = np.shape(MU)[1]
     eta = number_of_transient_states(N)
     SMat_Cell = s_matrix_cell(N)
 
-    PIs, PSs, PMat = probs_n_vars(MU, L, U, sigs, rho)
+    PIs, PSs, PMat = probs_n_vars_multi_mu(MU, L, U, sigs, rho)
     P = PMat
     Q = P[:eta, :eta]
     R = P[:eta, eta:]
