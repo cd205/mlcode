@@ -60,6 +60,9 @@ _Avoid_: rejected, failed
 The probability that a part entering a Stage (or a Sequence) eventually reaches Conforming, counting every rework cycle.
 _Avoid_: yield, pass rate
 
+**Reach Probability**:
+The probability r_i that a part started reaches Stage i of a Sequence: the product of the Final Conformance Probabilities of the Stages before it.
+
 ## Process settings
 
 **Mean Setting**:
@@ -88,5 +91,5 @@ The cost incurred when a part is scrapped from a given state. It already include
 The cost of an Inspection: a fixed amount per Stage plus an amount per inspected Feature.
 
 **Expected Profit**:
-Selling Price times the Final Conformance Probability of the Sequence, minus the expected Processing, Rework, Scrap and Inspection Costs per part started.
+Selling Price times the Final Conformance Probability of the Sequence, minus the expected Processing, Rework and Scrap Costs per part started. Inspection Cost is reported beside it as Expected Profit less Inspection Cost (thesis E(PR) − I); it doesn't depend on the Mean Settings, so both have the same optimum.
 _Avoid_: EP, profit function

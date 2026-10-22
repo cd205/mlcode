@@ -1,11 +1,12 @@
 # OMS Python Reconstruction: Analysis & Implementation Spec
 
-Status: **approved 2026-10-18**. Stage 0 is complete; Stage 1 is next.
+Status: **approved 2026-10-18**. Stage 0 is complete. Stage 1 is complete: the engine (#2) and its MATLAB oracles (#3). Stage 2 is complete: multi-Feature Gaussian evaluation (#4), U1 (ADR 0003), the Eq 3.59 and KB 2008 oracles (#5), and the multi-Feature transition oracles (#6, discrepancies D15 and D16). Stage 3 is complete: Sequences, Inspection Cost and the `Costs_MultiStage_MultiFeature` oracle (#7). Stage 4 is complete: `optimise_means` over a Sequence with the `per_feature` scheme recovers the R2–R5 optima (#8), and the `per_group_size` scheme recovers R6 and R7, with the `StageCostFun_MultiMu` oracle matching through the D8 adapter (#9), and the new `per_state` scheme nests the other two on R6 (#10). Stage 5 is complete: `search_sequences` ranks all 8 R8 Sequences; Seqs 6–8 match Table 3.9 through the Eq 3.59 oracle (D1), with misprints D18 and D19 (#11). Stage 6 is complete: an independent Monte Carlo chain simulator (`test_and_checks/chain_simulator.py`) agrees with the engine's f_C, m_{I,j} and E(PR) within 4 standard errors on R1–R8 at the printed means, and rejects the Eq 3.59 scrap cost at N = 3 (#12). The optional `K_and_B_DualQualitySimulation` port, a second independent Monte Carlo, agrees with the engine's f_C, scrap probability and m_{I,j} and with the script's own `KandBMarkov_DualChars` column, except the mismatched `f45_AA` (D20) (#13).
 
 This spec builds on:
 - [GLOSSARY.md](../GLOSSARY.md): the canonical terms. This document uses them exactly as defined there.
 - [ADR 0001](adr/0001-exact-absorbing-chain-scrap-cost.md): exact absorbing-chain scrap cost.
 - [ADR 0002](adr/0002-matlab-ports-are-test-oracles-only.md): MATLAB ports exist only as test oracles.
+- [ADR 0003](adr/0003-gaussian-box-probability-algorithms.md): Gaussian box-probability algorithms (U1).
 - [traceability.md](traceability.md) and [discrepancies.md](discrepancies.md).
 - Thesis: [CDodd_Thesis.pdf](CDodd_Thesis.pdf). The core material is Ch. 3 (printed pp. 47–118). PDF page = printed page + 20.
 
@@ -93,7 +94,7 @@ The model stores one Mean Setting for each transient state: a vector over that s
 | Scheme | Free parameters | Thesis name |
 |---|---|---|
 | `per_feature` | one μ per Feature, used for every state | Case I (Sec. 3.5) |
-| `per_group_size` | one μ per Feature per Rework Group Size k. The Rework State {1..N} shares I's means. | Case II (Eq 3.26–3.27) |
+| `per_group_size` | one μ per Feature per Rework Group Size k. The Rework State {1..N} shares I's means. When a Feature's Rework Side is `none`, the group sizes below N cover only the reworkable Features, and the largest Rework State has its own means. | Case II (Eq 3.26–3.27) |
 | `per_state` | one μ per Feature per state, N·2^(N−1) + N | new |
 
 ⚠ The thesis uses "Case I/II" for two different things: mean schemes in Sec. 3.5, and *cost formulas* in Table 3.1. See D7 in [discrepancies.md](discrepancies.md). The code never uses the words "Case I/II".
@@ -121,11 +122,11 @@ This is a static scan of all 45 curated files. Identifiers that match any `.m` f
 | Third-party utility | `combinator` (Matt Fig, FEX) | Replaced by `itertools.combinations`. Its `cumsumall` MEX path is reached only for integer classes, so it is unreachable here. |
 | Application orchestration | `Costs_MultiStage_MultiFeature` (script), `ProdCostFun` | Multi-Stage Eq 3.78 driver. `ProdCostFun` is an earlier N≤3 cost function built on `Probs_1/2/3Var`. |
 | **Validation oracles** | `Probs_1Var`, `Probs_2Var`, `Probs_3Var`, `MarkovProcess_1_Var`, `MarkovProcess_2_Var`, `Markov_TriChars`, `KandBMarkov_DualChars`, `K_and_B_2008_Example`, `Fun_Norm_Markov_DualChars`, `Fun_CMC_Markov` | Hand-written chains for N = 1, 2, 3, plus the Khasawneh & Bowling 2008 literature formula (Table 3.1, "Case I" cost formula). |
-| Validation, incomplete | `K_and_B_DualQualitySimulation` | Monte Carlo simulation. Needs the root files `KandBSimulate.m` and `KandBSimulate_1Var.m`, which are **not curated**. A useful independent oracle. |
+| Validation oracles (Monte Carlo) | `K_and_B_DualQualitySimulation`, `KandBSimulate`, `KandBSimulate_1Var` | Monte Carlo simulation of the Khasawneh & Bowling two-Feature chain. `KandBSimulate*` were curated from the repo root for issue #13. |
 | Related, deferred (non-Gaussian / CMC) | `CostModel_Example1`, `CostModel_Norm_Example1`, `CostModel_CMC_Example1`, `Opt_CMC_3d_Example1`, `Opt_NORM_3d_Example1` | Three-Feature cost examples. `Opt_CMC_3d_Example1` uses `copulacdf` and needs the root file `Fun_Cut_Measure_Cut_pdf.m` (**not curated**). Revisit in Stage 7 of the plan. |
 | **Unrelated** | `validation/Example1` | A Kriging/Branin/GA demo (reaches about 80 surrogate/sqplab files). Wrongly filed; leave it in place. |
 | Third-party optimisers | `fminsearchcon`, `ga`, `gaoptimset` (John D'Errico) | Not ported. SciPy replaces them. |
-| Historical | everything in `historical/` | `StageCostFun_old` (full-Σ input, N≤3 via `Probs_1/2/3Var`) is a useful oracle for correlated N≤3. The `_RP_*` copies are not authoritative. |
+| Historical | everything in `historical/` | `StageCostFun_old` (full-Σ input, N≤3 via `Probs_1/2/3Var`) is a useful oracle for correlated N≤2 and independent N=3; for correlated N=3 its pair Rework States drop the correlation (D15). The `_RP_*` copies are not authoritative. |
 
 ### 3.2 External/runtime dependencies
 
@@ -134,7 +135,8 @@ This is a static scan of all 45 curated files. Identifiers that match any `.m` f
 - **`nchoosek`, `factorial`:** combinatorics, standard library.
 - **`normcdf`:** **shadowed** by the root `normcdf.m` (Minka lightspeed, erf-based). It is numerically equivalent for `normcdf(x, m, s)`, so it does no harm, but it is recorded here.
 - **`copulacdf`, `quad`:** only in the deferred CMC examples.
-- **Missing from the curated folder:** `KandBSimulate.m`, `KandBSimulate_1Var.m` and `Fun_Cut_Measure_Cut_pdf.m`. They are at the repo root. Copy them into `legacy_matlab/validation/` when they become needed; never edit the originals.
+- **`mvnrnd`, `normrnd`:** only in the `K_and_B_DualQualitySimulation` port, which draws from a seeded NumPy `Generator` instead (MATLAB's stream can't be reproduced).
+- **Missing from the curated folder:** `Fun_Cut_Measure_Cut_pdf.m` (`KandBSimulate.m` and `KandBSimulate_1Var.m` were copied in for #13). It is at the repo root. Copy it into `legacy_matlab/validation/` when they become needed; never edit the originals.
 
 ## 4. Existing vs new capability
 
@@ -214,7 +216,7 @@ class Sequence:
 
 ```python
 class JointDistribution(Protocol):
-    def box_probability(self, means: ArrayLike, lower: ArrayLike, upper: ArrayLike) -> Probability: ...
+    def box_probability(self, means: ArrayLike, lower: ArrayLike, upper: ArrayLike, *, rng_seed: int = 0) -> Probability: ...
     def marginal(self, indices: Sequence[int]) -> "JointDistribution": ...
 
 @dataclass(frozen=True)
@@ -224,13 +226,15 @@ class Probability:
     abs_error: float                  # 0 for analytic
 ```
 
-The `MultivariateNormal(sigmas, corr)` implementation:
+The `MultivariateNormal(sigmas, corr)` implementation ([ADR 0003](adr/0003-gaussian-box-probability-algorithms.md)):
+- The box factorises over independent blocks of the correlation matrix, and ±1-correlated Features are merged, so independent Features are always analytic.
 - **1 dimension:** `scipy.special.ndtr` (analytic).
-- **2–3 dimensions:** deterministic. Either Owen's T / Drezner-type routines, or SciPy `multivariate_normal.cdf` with fixed `rng` and a tight `abseps`, *verified* against analytic independent cases. ⚠ This choice is resolved in Stage 2 (U1).
-- **4 or more dimensions:** seeded QMC with the tolerance reported.
-- The constructor checks that the correlation matrix is positive semi-definite. `corr=float` builds an equicorrelation matrix.
+- **2 dimensions:** a port of Genz's BVNU (Gauss–Legendre, deterministic), reported error 4e-15.
+- **3 dimensions:** adaptive quadrature over one variable of the conditional bivariate box, reporting quad's error estimate.
+- **4 or more dimensions:** Genz separation of variables on scrambled Sobol points, seeded by `rng_seed`, reporting the standard error.
+- The constructor checks that the correlation matrix is positive semi-definite. `corr=float` builds an equicorrelation matrix (default 0, independence).
 
-`GaussianCopula(marginals: Sequence[scipy.stats frozen dist], corr)` computes a box probability through the copula CDF, using inclusion–exclusion over 2^d corners.
+`GaussianCopula(marginals: Sequence[scipy.stats frozen dist], corr)` computes a box probability through the copula CDF. Inclusion–exclusion over the 2^d corners equals the standard Gaussian box between the limits' normal scores, so it is computed that way, by the ADR 0003 algorithms. Marginals are centred on 0 and the Mean Setting is added to their draw ([ADR 0004](adr/0004-gaussian-copula-box-via-normal-scores.md)).
 
 ### 5.3 Evaluation
 
@@ -245,7 +249,7 @@ evaluate_sequence(seq, means: Sequence[MeanSettings], *, rng_seed=0) -> ProfitBr
 
 ```python
 optimise_means(seq, scheme: Literal["per_feature","per_group_size","per_state"],
-               *, bounds=None, n_starts=8, seed=0, method="L-BFGS-B", tol=1e-9) -> OptimisationResult
+               *, objective="expected_profit", bounds=None, n_starts=8, seed=0, method=None, tol=1e-9) -> OptimisationResult
 search_sequences(features_in_order, stage_builder, selling_price, scheme, **opt_kwargs) -> list[SequenceResult]
     # enumerates all 2^(N−1) Inspection placements, optimises each, ranks by E(PR)
 ```
@@ -254,6 +258,8 @@ search_sequences(features_in_order, stage_builder, selling_price, scheme, **opt_
 - Multi-start points are seeded.
 - The method, tolerances, number of evaluations and seed are recorded in the result.
 - Bounded Nelder–Mead is used when the objective contains Monte Carlo terms.
+- `objective="expected_profit" | "production_cost"` chooses between maximising E(PR) and minimising Processing + Scrap + Rework Cost (U2). A one-Stage problem is a one-Stage Sequence, which carries the Selling Price.
+- `method=None` (the default) means L-BFGS-B, unless the objective has Monte Carlo terms at the first start point, when bounded Nelder–Mead is used. `seed` seeds both the start points and every Monte Carlo box probability, so the objective is deterministic.
 
 ## 6. Reference cases & acceptance criteria
 
@@ -268,17 +274,17 @@ search_sequences(features_in_order, stage_builder, selling_price, scheme, **opt_
 | R1 | Fig 3.12/3.14, 1 Feature | μ=5, σ=1, [3,7] | first-pass conform 0.9545; m_{I,I}=1.0233; f_C≈0.9767 | f_C = 0.97672, rework visits 0.02328 ✓ |
 | R2 | Table 3.3, 1 Feature | U=12, L=8, σ=1, SP=120, PC=25, RC=10, SC=15 | μ\*=10.61 (profit), 10.09 (min cost) | μ\* = 10.614 ✓; min PC+Sr+Rw μ = 10.0875 ✓ |
 | R3 | Table 3.1, 2 Features, Eq 3.44 | L=[8,13], U=[12,17], σ=1, SP=120, PC=45, RC={1}:15, {2}:12, {1,2}:20; SC=I:8, {1}:9, {2}:11, {1,2}:14 | 71.4287 @ [10.5115, 15.5651] | 71.42872 ✓ |
-| R3-oracle | Table 3.1, Khasawneh & Bowling (KB) 2008 formula (port of `K_and_B_2008_Example`) | same as R3 | 71.1592 @ [10.5514, 15.6080] | oracle only (D7) |
+| R3-oracle | Table 3.1, Khasawneh & Bowling (KB) 2008 formula (port of `K_and_B_2008_Example`) | same as R3 | 71.1592 @ [10.5514, 15.6080] | 71.1592 ✓ (oracle only, D7) |
 | R4 | Table 3.7, 2 Features parallel (inputs visually confirmed 2026-10-17) | L=[8,13], U=[12,17], σ=1, SP=120, PC=45, RC={1}:15, {2}:12, {1,2}:27; SC=27 for every state | 71.17 @ [10.537, 15.590]; min production cost 46.753 @ [10.128, 15.181] | 71.1723 @ [10.537, 15.590]; 46.7530 @ [10.128, 15.181] ✓ |
 | R5 | Table 3.5, 2 Stages serial | PC=[25,20], RC=[15,12], SC=[10,27] | 71.41 @ [10.466, 15.591] | 71.4120 ✓ |
 | R6 | Tables 3.10/3.11 `per_feature` vs `per_group_size` (visually confirmed 2026-10-17) | U=6, L=4, **σ=2** (not σ²=2), **SP=400** (not the printed 500, D11), PC=50, RC={1}:25, {2}:25, {1,2}:50, SC=150, Rework Side above U. Case II order: (μ₁,₁, μ₁,₂) = dual-feature means (I and {1,2}); (μ₂,₁, μ₂,₂) = single-feature rework means | 40.87 @ [6.85, 6.85]; 41.66 @ [6.75, 6.75, 7.02, 7.02]; f_C 0.5933/0.5935; production cost (Sr+Rw) 146.44/145.75 | 40.8747 @ 6.851; 41.6581 @ [6.748, 7.022]; Sr+Rw 146.44/145.75 ✓ |
 | R7 | Table 3.13 correlated (visually confirmed 2026-10-17) | as R6 with ρ = ±0.8 | ρ=0.8: 56.4038 @ 6.65 / 58.3309 @ [6.52, 7.02]; Sr+Rw 140.24/138.93; f_C 0.6166/0.6181. ρ=−0.8: 45.11 @ 6.80 / 47.10 @ [6.57, 7.02]; Sr+Rw 139.65/136.60; f_C 0.5869/0.5842 | all ✓ (56.4038, 58.3309, 45.1141, 47.0993) |
-| R8 | Tables 3.8/3.9 and Fig 3.27 Sequences, 4 Features (inputs visually confirmed 2026-10-17) | SP=120, PC=[25,20,12,15], RC=[15,12,8,10], SC=[10,17,5,12], L=[8,13,10,7], U=[12,17,14,11], σ=1, IC=0.5+0.5/Feature | e.g. Seq 1 41.7523; Seq 8 40.8657 | – (expect small N≥3 gap, ADR 0001) |
-| R9 | Tables 4.1/4.3 connecting rod, copula (Stage 7; D6) | Units cm: L=[6.9, 3.925], U=[7.1, 4.075]; x₁ Normal σ=0.1362; x₂ tLocation-Scale scale 0.0527, ν=2.2522; Gaussian copula ρ=0.7052; Rework Side below L; SP=100, PC=20, RC={1}:5, {2}:5, {1,2}:10, SC=50; `per_group_size` | 44.47 @ [6.8737, 3.9514, 6.8441, 3.9486] | 44.4708 @ printed means ✓ |
+| R8 | Tables 3.8/3.9 and Fig 3.27 Sequences, 4 Features (inputs visually confirmed 2026-10-17) | SP=120, PC=[25,20,12,15], RC=[15,12,8,10], SC=[10,17,5,12], L=[8,13,10,7], U=[12,17,14,11], σ=1, IC=0.5+0.5/Feature | e.g. Seq 1 41.7523; Seq 8 40.8657 | – (expect small N≥3 gap, ADR 0001). Engine 2026-10-22: Seqs 1–5 ✓; Seqs 6–8 lower by 3e-5 to 2.2e-4, closed by the Eq 3.59 oracle (D1) |
+| R9 | Tables 4.1/4.3 connecting rod, copula (Stage 7; D6) | Units cm: L=[6.9, 3.925], U=[7.1, 4.075]; x₁ Normal σ=0.1362; x₂ tLocation-Scale scale 0.0527, ν=2.2522; Gaussian copula ρ=0.7052; Rework Side below L; SP=100, PC=20, RC={1}:5, {2}:5, {1,2}:10, SC=50; `per_group_size` | 44.47 @ [6.8737, 3.9514, 6.8441, 3.9486] | 44.4708 @ printed means ✓. Engine 2026-10-22: ✓, and `per_group_size` optimum 44.4708 within 5e-5 cm of the printed means (D6) |
 
 **Oracle tests** (ports of MATLAB, `test_and_checks/oracles/`):
 - Eq 3.59 S∘D scrap must equal the engine exactly for N ≤ 2. For N = 3 and 4 the gap is recorded and shown to be negative.
-- `Probs_1/2/3Var`, `MarkovProcess_*`, `Markov_TriChars` and `KandBMarkov_DualChars` must match the engine's transition probabilities and m/f values to 1e-10 at the same inputs.
+- `Probs_1/2/3Var`, `MarkovProcess_*`, `Markov_TriChars` and `KandBMarkov_DualChars` must match the engine's transition probabilities and m/f values to 1e-10 at the same inputs (1e-8 for correlated 2–3D boxes). Where the MATLAB is defective (D15, D16), the tests assert the characterised deviation instead.
 - Monte Carlo simulation of the chain (a fresh Python implementation of A1–A7) must agree with f_C, m and E(PR) within 4 standard errors at a fixed seed.
 
 **Property tests:**
@@ -328,7 +334,7 @@ Every stage ends with green `pytest` on `test_and_checks/` and one runnable scri
 - *Exit:* R8, all 8 Sequences. Any difference beyond the printed precision for Stages with 3 or more Features must be explained by the ADR 0001 gap. Show this by also running the Eq 3.59 oracle.
 
 **Stage 6: Monte Carlo validation harness.**
-- An independent chain simulator for cross-checking every R-case. Optionally port `K_and_B_DualQualitySimulation` once its missing files are curated.
+- An independent chain simulator for cross-checking every R-case. Optionally port `K_and_B_DualQualitySimulation` once its missing files are curated (done, #13).
 
 **Stage 7: Non-Gaussian distributions.**
 - `GaussianCopula` + SciPy marginals. Clayton and Frank when the connecting-rod case (Sec. 4.3) is taken on.
@@ -336,7 +342,7 @@ Every stage ends with green `pytest` on `test_and_checks/` and one runnable scri
 
 ## 8. Open unknowns (to resolve inside the named stage)
 
-- **U1 (Stage 2):** which deterministic algorithm is used for 2D/3D box probabilities, and the accuracy it can prove. The candidates are SciPy with a tight `abseps`, or a dedicated bivariate/trivariate routine.
+- **U1 (Stage 2), resolved 2026-10-21:** 2D uses a vectorised port of Genz's BVNU (error 4e-15 per box). 3D integrates the conditional bivariate box by adaptive quadrature (quad's error estimate, typically 1e-14). Both are verified against closed-form orthant probabilities and independent quadrature oracles. SciPy's `multivariate_normal.cdf` was rejected because it is randomised QMC in every dimension. See [ADR 0003](adr/0003-gaussian-box-probability-algorithms.md).
 - **U2 (Stage 1), resolved 2026-10-18:** production cost = PC + Sr + Rw per part started (p. 101: "Production cost is E(PR) − SP f_{I,C}", printed without the sign flip). It is not per conforming part, which would give μ = 10.33. Minimising it reproduces R2 (10.0875) and R4 (46.7530 @ [10.128, 15.181]). Tables 3.11/3.13 report Sr + Rw without PC (D12), so the engine reports PC, Sr and Rw separately and tests compare the matching sum.
 - **U3 (Stage 3), resolved 2026-10-17:** Inspection Cost is a flat IC_stage + IC_feature·N per Stage, summed over the Sequence and subtracted from E(PR) per part started (thesis pp. 108–110: "an inspection process is implicit after each stage… a cost of 0.5 units with a further 0.5 units for each feature inspected"). Table 3.9's I column matches this for Seqs 1–7. Seq 8 is a misprint (D10).
 - **U4 (Stage 4), resolved 2026-10-17:** R6/R7 confirmed visually and reproduced by a throwaway calculation once σ=2 and SP=400 are used (D11).
