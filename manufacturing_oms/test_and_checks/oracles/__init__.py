@@ -1,5 +1,12 @@
 """Faithful ports of the legacy MATLAB, used only as test oracles (ADR 0002). Never import these from `oms`."""
 
+from oracles.costs_multi_stage_multi_feature import (
+    TWO_STAGE_DUAL_FEATURE,
+    TWO_STAGE_SINGLE_FEATURE,
+    CostsMultiStageMultiFeatureOutput,
+    SequenceLoopOutput,
+    costs_multi_stage_multi_feature,
+)
 from oracles.fun_cmc_markov import FunCMCMarkovOutput, fun_cmc_markov
 from oracles.kandb_markov_dual_chars import (
     KAndB2008ExampleOutput,
@@ -17,13 +24,18 @@ from oracles.stage_cost_fun import probs_n_vars, s_matrix_cell, stage_cost_fun
 from oracles.stage_cost_fun_old import StageCostFunOldOutput, stage_cost_fun_old
 
 __all__ = [
+    "TWO_STAGE_DUAL_FEATURE",
+    "TWO_STAGE_SINGLE_FEATURE",
+    "CostsMultiStageMultiFeatureOutput",
     "FunCMCMarkovOutput",
     "KAndB2008ExampleOutput",
     "KandBMarkovDualCharsOutput",
     "MarkovProcess1VarOutput",
     "MarkovProcess2VarOutput",
     "MarkovTriCharsOutput",
+    "SequenceLoopOutput",
     "StageCostFunOldOutput",
+    "costs_multi_stage_multi_feature",
     "fun_cmc_markov",
     "k_and_b_2008_example",
     "kandb_markov_dual_chars",

@@ -11,7 +11,17 @@ from itertools import combinations
 import numpy as np
 import pytest
 
-from oms import CostTable, Feature, MeanSettings, MultivariateNormal, ReworkSide, Stage, evaluate_stage
+from oms import (
+    CostTable,
+    Feature,
+    MeanSettings,
+    MultivariateNormal,
+    ReworkSide,
+    Sequence,
+    Stage,
+    evaluate_sequence,
+    evaluate_stage,
+)
 from oracles import markov_process_2_var, markov_tri_chars, probs_2var, probs_3var, s_matrix_cell, stage_cost_fun, stage_cost_fun_old
 
 I = frozenset()
@@ -297,8 +307,8 @@ class TestMarkovTriChars:
 
 class TestMarkovProcess2Var:
     """`MarkovProcess_2_Var`: two one-Feature Stages in series, by Bowling 2004's chain, the thesis's series
-    chain and the generalised multi-Stage form. The engine evaluates each Stage; E(PR) is composed by Eq 3.78
-    until `evaluate_sequence` arrives (#7)."""
+    chain and the generalised multi-Stage form. The engine evaluates each Stage, and `evaluate_sequence`
+    composes E(PR) by Eq 3.78."""
 
     SP, PC, RC, SC = 100.0, (4.0, 6.0), (1.0, 2.0), (5.0, 3.0)  # the script's hard-coded costs
 
@@ -353,12 +363,20 @@ class TestMarkovProcess2Var:
         assert [first.expected_scrap_cost, first.expected_rework_cost] == pytest.approx([out.SR_1, out.RW_1], abs=TOL)
         assert [second.expected_scrap_cost, second.expected_rework_cost] == pytest.approx([out.SR_2, out.RW_2], abs=TOL)
 
-        reach = first.final_conformance  # r_2: the probability of reaching the second Stage
-        expected_profit = (
-            self.SP * first.final_conformance * second.final_conformance
-            - (self.PC[0] + first.expected_scrap_cost + first.expected_rework_cost)
-            - (self.PC[1] + second.expected_scrap_cost + second.expected_rework_cost) * reach
-        )
+        stages = [
+            Stage(
+                features=(Feature(n, lower=L[i], upper=U[i], rework_side=ReworkSide.UPPER),),
+                variation=MultivariateNormal([sigmas[i]]),
+                costs=CostTable(processing=self.PC[i], rework={frozenset({n}): self.RC[i]},
+                                scrap={I: self.SC[i], frozenset({n}): self.SC[i]}),
+            )
+            for i, n in enumerate(["x1", "x2"])
+        ]
+        means = [MeanSettings.per_feature(stage, {stage.feature_names[0]: CUT[i]}) for i, stage in enumerate(stages)]
+        sequence = evaluate_sequence(Sequence(tuple(stages), self.SP), means)
+        assert sequence.reach_probabilities == pytest.approx([1.0, out.fI1_C], abs=TOL)
+        assert sum(sequence.scrap_costs) == pytest.approx(out.SR_Tot, abs=TOL)
+        expected_profit = sequence.expected_profit
         assert expected_profit == pytest.approx(out.EPR_conventional, abs=TOL)
         assert expected_profit == pytest.approx(out.EPR_modified, abs=TOL)
         assert expected_profit == pytest.approx(out.EPR_generalised, abs=TOL)

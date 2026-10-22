@@ -22,7 +22,7 @@ The design, reference cases and staged plan are in [docs/spec.md](docs/spec.md).
 - `legacy_matlab/optimisation`: original general-purpose MATLAB optimisers (third-party utilities; review licences before porting).
 - `legacy_matlab/historical`: earlier and RP variants retained for comparison, **not** canonical implementations.
 - `src/oms`: the Python engine (`model`, `distributions`, `markov`, `economics`, `optimisation`; spec §5).
-- `examples`: runnable reproductions of thesis cases, e.g. `uv run python examples/single_feature_table_3_3.py` (R2) and `examples/parallel_two_features_tables_3_1_3_7.py` (R3, R4).
+- `examples`: runnable reproductions of thesis cases, e.g. `uv run python examples/single_feature_table_3_3.py` (R2) and `examples/parallel_two_features_tables_3_1_3_7.py` (R3, R4) and `examples/serial_two_stages_table_3_5.py` (R5).
 - `test_and_checks`: correctness and thesis-regression checks.
 
 ## Core MATLAB call graph

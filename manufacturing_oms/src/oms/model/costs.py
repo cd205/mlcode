@@ -1,4 +1,4 @@
-"""Per-state cost table for one Stage (GLOSSARY: Processing, Rework and Scrap Cost)."""
+"""Costs of one Stage (GLOSSARY: Processing, Rework, Scrap and Inspection Cost)."""
 
 from __future__ import annotations
 
@@ -53,6 +53,21 @@ class CostTable:
             rework={g: sum(rework_per_feature[n] for n in g) for g in groups},
             scrap={g: total_scrap for g in [frozenset(), *groups]},
         )
+
+
+@dataclass(frozen=True)
+class InspectionCost:
+    """A flat charge per part started for one Stage's Inspection: per_stage + per_feature · N (U3)."""
+
+    per_stage: float = 0.0
+    per_feature: float = 0.0
+
+    def __post_init__(self) -> None:
+        _check_cost("per-stage inspection", self.per_stage)
+        _check_cost("per-feature inspection", self.per_feature)
+
+    def for_features(self, n_features: int) -> float:
+        return self.per_stage + self.per_feature * n_features
 
 
 def _check_cost(label: str, value: float) -> None:

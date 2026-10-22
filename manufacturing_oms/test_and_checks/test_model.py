@@ -4,7 +4,17 @@ import dataclasses
 
 import pytest
 
-from oms import CostTable, Feature, MeanSettings, MultivariateNormal, ReworkSide, Stage
+from oms import (
+    CostTable,
+    Feature,
+    InspectionCost,
+    MeanSettings,
+    MultivariateNormal,
+    ReworkSide,
+    Sequence,
+    Stage,
+    evaluate_sequence,
+)
 
 I = frozenset()
 X = frozenset({"x"})
@@ -134,3 +144,62 @@ class TestMeanSettings:
         means = MeanSettings.per_feature(stage(), {"x": 10.5})
         with pytest.raises(TypeError):
             means.by_state[I]["x"] = 0.0  # type: ignore[index]
+
+
+class TestInspectionCost:
+    def test_is_per_stage_plus_per_feature_inspected(self):
+        assert InspectionCost(per_stage=0.5, per_feature=0.25).for_features(3) == 1.25
+
+    def test_defaults_to_free(self):
+        assert stage().inspection_cost == 0.0
+
+    @pytest.mark.parametrize("kwargs", [{"per_stage": -0.5}, {"per_feature": -0.5}, {"per_stage": float("nan")}])
+    def test_costs_must_be_finite_and_non_negative(self, kwargs):
+        with pytest.raises(ValueError):
+            InspectionCost(**kwargs)
+
+
+def named_stage(name):
+    x = frozenset({name})
+    return Stage(
+        features=(Feature(name, lower=8.0, upper=12.0, rework_side=ReworkSide.UPPER),),
+        variation=MultivariateNormal([1.0]),
+        costs=CostTable(processing=25.0, rework={x: 10.0}, scrap={I: 15.0, x: 15.0}),
+    )
+
+
+class TestSequence:
+    def test_keeps_its_stages_as_a_tuple(self):
+        stages = [named_stage("a"), named_stage("b")]
+        assert Sequence(stages, selling_price=120.0).stages == tuple(stages)  # type: ignore[arg-type]
+
+    def test_needs_at_least_one_stage(self):
+        with pytest.raises(ValueError, match="Stage"):
+            Sequence((), selling_price=120.0)
+
+    def test_feature_names_must_be_unique_across_stages(self):
+        with pytest.raises(ValueError, match="unique"):
+            Sequence((named_stage("a"), named_stage("a")), selling_price=120.0)
+
+    @pytest.mark.parametrize("price", [-1.0, float("inf"), float("nan")])
+    def test_selling_price_must_be_finite_and_non_negative(self, price):
+        with pytest.raises(ValueError, match="Selling Price"):
+            Sequence((named_stage("a"),), selling_price=price)
+
+    def test_is_immutable(self):
+        sequence = Sequence((named_stage("a"),), selling_price=120.0)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            sequence.selling_price = 0.0  # type: ignore[misc]
+
+    def test_evaluation_needs_one_mean_setting_per_stage(self):
+        a, b = named_stage("a"), named_stage("b")
+        sequence = Sequence((a, b), selling_price=120.0)
+        with pytest.raises(ValueError, match="one Mean Setting per Stage"):
+            evaluate_sequence(sequence, [MeanSettings.per_feature(a, {"a": 10.0})])
+
+    def test_evaluation_checks_each_mean_setting_against_its_stage(self):
+        a, b = named_stage("a"), named_stage("b")
+        sequence = Sequence((a, b), selling_price=120.0)
+        swapped = [MeanSettings.per_feature(b, {"b": 10.0}), MeanSettings.per_feature(a, {"a": 10.0})]
+        with pytest.raises(ValueError):
+            evaluate_sequence(sequence, swapped)

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from oms.distributions.base import JointDistribution
 from oms.markov.states import INITIAL_STATE, State, enumerate_states
-from oms.model.costs import CostTable
+from oms.model.costs import CostTable, InspectionCost
 from oms.model.feature import Feature
 
 MAX_FEATURES = 10
@@ -19,6 +19,7 @@ class Stage:
     features: tuple[Feature, ...]
     variation: JointDistribution
     costs: CostTable
+    inspection: InspectionCost = InspectionCost()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "features", tuple(self.features))
@@ -44,6 +45,11 @@ class Stage:
     def states(self) -> tuple[State, ...]:
         """Transient states: the Initial State, then the Rework States (spec §2.1 ordering)."""
         return enumerate_states(self.features)
+
+    @property
+    def inspection_cost(self) -> float:
+        """The flat Inspection Cost of this Stage per part started (U3)."""
+        return self.inspection.for_features(len(self.features))
 
 
 def _check_keys(label: str, given: set[State], expected: set[State]) -> None:
