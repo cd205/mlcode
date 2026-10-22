@@ -1,8 +1,9 @@
-"""Tying schemes compared on thesis Tables 3.10, 3.11 and 3.13 (R6, R7): per_feature vs per_group_size."""
+"""Tying schemes compared on thesis Tables 3.10, 3.11 and 3.13 (R6, R7): per_feature, per_group_size, per_state."""
 
 import pytest
 
 from oms import CostTable, Feature, MultivariateNormal, ReworkSide, Sequence, Stage, optimise_means
+from oms.optimisation.tying import Tying
 
 I = frozenset()
 X1 = frozenset({"x1"})
@@ -69,3 +70,57 @@ def test_per_group_size_optimum(rho, per_feature, per_group_size):
     assert round(scrap_plus_rework(result), 2) == cost
     # The per_feature means are a special case, so per_group_size can only do as well or better.
     assert result.objective_value >= optimise_means(table_3_10(rho), "per_feature").objective_value
+
+
+def stage_of(n_features, none_side=(), prefix="x"):
+    """N Features, those named in `none_side` never reworked; costs are irrelevant to the layout."""
+    names = [f"{prefix}{i}" for i in range(1, n_features + 1)]
+    features = tuple(
+        Feature(n, lower=4.0, upper=6.0, rework_side=ReworkSide.NONE if n in none_side else ReworkSide.UPPER)
+        for n in names
+    )
+    reworkable = [f.name for f in features if f.reworkable]
+    return Stage(
+        features=features,
+        variation=MultivariateNormal([2.0] * n_features),
+        costs=CostTable.additive(
+            processing=1.0,
+            rework_per_feature={n: 1.0 for n in reworkable},
+            scrap_per_feature={n: 1.0 for n in names},
+        ),
+    )
+
+
+@pytest.mark.parametrize("n_features, count", [(1, 2), (2, 6), (3, 15), (4, 36)])
+def test_per_state_has_n_times_2_to_the_n_minus_1_plus_n_parameters(n_features, count):
+    sequence = Sequence(stages=(stage_of(n_features),), selling_price=400.0)
+    assert len(Tying(sequence, "per_state").parameter_features) == count
+
+
+def test_per_state_parameters_with_a_feature_never_reworked():
+    # x3 is never reworked: I has 3 means, then {x1}, {x2} one each and {x1, x2} two.
+    sequence = Sequence(stages=(stage_of(3, none_side=("x3",)),), selling_price=400.0)
+    assert Tying(sequence, "per_state").parameter_features == ("x1", "x2", "x3", "x1", "x2", "x1", "x2")
+
+
+def test_per_state_expands_one_mean_per_feature_per_state_stage_by_stage():
+    sequence = Sequence(stages=(table_3_10(0.0).stages[0], stage_of(1, prefix="y")), selling_price=400.0)
+    first, second = Tying(sequence, "per_state").expand([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+    assert first.by_state == {I: {"x1": 1.0, "x2": 2.0}, X1: {"x1": 3.0}, X2: {"x2": 4.0}, X12: {"x1": 5.0, "x2": 6.0}}
+    assert second.by_state == {I: {"y1": 7.0}, frozenset({"y1"}): {"y1": 8.0}}
+    first.check_against(sequence.stages[0])
+    second.check_against(sequence.stages[1])
+
+
+def test_per_state_nests_the_other_schemes_on_r6():
+    per_feature = optimise_means(table_3_10(0.0), "per_feature")
+    per_group_size = optimise_means(table_3_10(0.0), "per_group_size")
+    per_state = optimise_means(table_3_10(0.0), "per_state")
+    assert per_state.scheme == "per_state"
+    # Each scheme's means are a special case of the next, so a finer scheme can only do as well or better.
+    # On R6 I and {x1, x2} process the same Features with the same Scrap Cost and successors (RC_{x1,x2} is
+    # paid on entering), so per_state's optimum is per_group_size's and the two agree only to rounding.
+    assert per_state.objective_value >= per_group_size.objective_value - 1e-9
+    assert per_group_size.objective_value >= per_feature.objective_value
+    means = per_state.means[0]
+    assert dict(means.by_state[X12]) == pytest.approx(dict(means.by_state[I]), abs=1e-4)

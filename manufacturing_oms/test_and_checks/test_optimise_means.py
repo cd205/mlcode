@@ -173,4 +173,4 @@ def test_method_can_be_chosen():
 
 def test_unknown_scheme_is_rejected():
     with pytest.raises(ValueError):
-        optimise_means(table_3_5(), "per_state")  # type: ignore[arg-type]
+        optimise_means(table_3_5(), "per_operator")  # type: ignore[arg-type]

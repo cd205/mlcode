@@ -1,7 +1,9 @@
-"""Reference cases R6 and R7 (thesis Tables 3.10, 3.11 and 3.13): per_feature vs per_group_size Mean Settings.
+"""Reference cases R6 and R7 (thesis Tables 3.10, 3.11 and 3.13): per_feature vs per_group_size vs per_state.
 
 Two Features, Rework Side above U, σ = 2 and SP = 400 as the thesis code ran them (D11). The thesis's
-"production cost" here is Scrap + Rework Cost, without the Processing Cost (D12).
+"production cost" here is Scrap + Rework Cost, without the Processing Cost (D12). per_state ties with
+per_group_size: I and {x1, x2} process the same Features with the same Scrap Cost and successors, so their
+optimal means coincide.
 
 Run from manufacturing_oms/ with:  uv run python examples/tying_schemes_tables_3_11_3_13.py
 """
@@ -33,10 +35,10 @@ PRINTED = {
 
 for rho, printed in PRINTED.items():
     print(f"rho = {rho:+.1f}")
-    for scheme, thesis in zip(("per_feature", "per_group_size"), printed):
+    for scheme, thesis in zip(("per_feature", "per_group_size", "per_state"), (*printed, "none, new scheme")):
         result = optimise_means(table_3_10(rho), scheme)
         means, stage = result.means[0], result.breakdown.stages[0]
-        # Thesis order (μ₁,₁, μ₁,₂, μ₂,₁, μ₂,₂): the means in I and {x1, x2}, then in {x1} and {x2}.
+        # Thesis order (μ₁,₁, μ₁,₂, μ₂,₁, μ₂,₂): the means in I (and {x1, x2}, equal on R6), then in {x1} and {x2}.
         mu = [means.by_state[I]["x1"], means.by_state[I]["x2"], means.by_state[X1]["x1"], means.by_state[X2]["x2"]]
         print(f"  {scheme:<15} E(PR) {result.objective_value:.4f} @ [{', '.join(f'{m:.3f}' for m in mu)}]")
         print(f"  {'':<15} f_C {stage.final_conformance:.4f}, Scrap + Rework Cost "
