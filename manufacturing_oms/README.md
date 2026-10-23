@@ -14,6 +14,14 @@ uv run mypy      # strict type check of src/
 
 The design, reference cases and staged plan are in [docs/spec.md](docs/spec.md).
 
+Notebooks for interactive experiments live in `notebooks/`. They need the opt-in `notebook` group (Jupyter kernel and matplotlib):
+
+```
+uv sync --group notebook
+```
+
+Then open e.g. `notebooks/single_stage_experiment.ipynb` in VS Code and pick the `.venv` kernel.
+
 ## Folders
 
 - `legacy_matlab/core`: stage-level Markov and probability calculations, state/matrix construction.
