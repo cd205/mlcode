@@ -2,3 +2,4 @@ manufacturing_oms/docs/CDodd_Thesis.pdf
 __pycache__/
 .pytest_cache/
 .venv/
+.ipynb_checkpoints/

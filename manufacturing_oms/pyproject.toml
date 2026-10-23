@@ -15,6 +15,10 @@ dev = [
     "pytest",
     "scipy-stubs>=1.17.1.5",
 ]
+notebook = [
+    "ipykernel>=7.4.0",
+    "matplotlib>=3.11.2",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.1,<0.14"]
