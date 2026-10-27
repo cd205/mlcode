@@ -50,14 +50,18 @@ The number of Features reworked together in a Rework State.
 
 **Conforming**:
 The absorbing state reached when every Feature of the Stage is within its Specification Limits.
-_Avoid_: good, pass, accepted
+_Avoid_: good, passed, accepted
 
 **Scrapped**:
 The absorbing state reached when any Feature falls on its Scrap Side. One scrapped Feature scraps the whole part.
 _Avoid_: rejected, failed
 
+**Pass**:
+One Inspection of a part at a Stage; the k-th Pass is the part's k-th Inspection there. A part leaves a Pass Conforming, Scrapped, or in a Rework State for the next Pass.
+_Avoid_: cycle, iteration, round
+
 **Final Conformance Probability**:
-The probability that a part entering a Stage (or a Sequence) eventually reaches Conforming, counting every rework cycle.
+The probability that a part entering a Stage (or a Sequence) eventually reaches Conforming, counting every Pass.
 _Avoid_: yield, pass rate
 
 **Reach Probability**:
