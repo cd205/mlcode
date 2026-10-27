@@ -1,7 +1,7 @@
 # OMS Web App: Prototype Plan
 
 Status: **approved 2026-10-27** (W0 done in a grilling session). Nothing in this plan is built yet. Work through
-W1–W4 in order. Each stage ends with green `uv run pytest` and something you can run.
+the §8 tickets (#23–#33), blockers first. Each ticket ends with green `uv run pytest` and something you can run.
 
 This plan builds on:
 - [GLOSSARY.md](../GLOSSARY.md): use the terms exactly as defined (Stage, Feature, Parallel, Serial, Rework
@@ -169,27 +169,25 @@ outgrows it):
 
 **W0: Agree the open decisions (no code).** *Done 2026-10-27*: §2 C6–C18, ADR 0005, and the glossary term Pass.
 
-**W1: Sequence format, presets and results (`oms.formats`).**
-- Parse and validate the format into `Sequence` + `MeanSettings`; serialise back (round-trip).
-- `run()` returning the §5 results, including per-Pass counts.
-- The C13 presets with their thesis references.
-- *Exit:* tests that every preset reproduces its reference within its tolerance through `run()`; round-trip
-  tests; R1 per-Pass counts match Fig 3.14; per-Pass sums close on R1–R8.
-- *Example:* a notebook cell or script that loads a preset and prints the results.
+**W1–W4: the prototype, as vertical-slice tickets.** Each ticket cuts through the format, `run()`, the API and
+the page, so it can be shown working on its own. The acceptance criteria are in the issues. The format grows
+ticket by ticket; together the tickets cover every preset (C13) and every §5–§7 item.
 
-**W2: FastAPI backend (`web/`).**
-- The §6 endpoints, request checks and limits.
-- *Exit:* API tests with FastAPI's test client (every preset through `/api/evaluate`; a malformed request gives
-  a 422 with a readable message and no traceback). `uv run uvicorn app.main:app` serves it locally.
+| Issue | Ticket | Blocked by |
+|---|---|---|
+| #23 | 1a: sequence format, `run()` and per-Pass counts for R1 (tests and an example script, no web) | – |
+| #24 | 1b: R1 in the browser: `web/`, presets and evaluate endpoints, page, diagram, errors (C18) | #23 |
+| #25 | 2: Serial Sequences (R2, R5); multi-Stage diagram | #24 |
+| #26 | 3: Parallel Stages and Rework States (R3, R4); state keys, cost shortcut | #24 |
+| #27 | 4: Optimise Mean Settings, with undo | #24 |
+| #28 | 5: other tying schemes (R6, R7: 6 presets); read-only means | #26, #27 |
+| #29 | 6: R8 Inspection placements (8 presets) | #26 |
+| #30 | 7: copula Process Variation (R9) | #28 |
+| #31 | 8: builder editing; download and upload | #26 |
+| #32 | 9: request limits and timing (W-U4) | #27, #29 |
+| #33 | 10: prototype review (human), with W-U1 | #25, #28–#32 |
 
-**W3: Builder page.**
-- The §7 page served from `/`.
-- *Exit:* in a browser, load each preset, evaluate and optimise it, add and remove Stages and Features, and see
-  the diagram update. R1's diagram shows the Fig 3.14 numbers.
-
-**W4: Prototype review.**
-- Use it, list what's missing, decide whether to go on to hosting and whether a frontend framework is needed.
-- *Exit:* a short list of follow-up issues.
+These replace the earlier layer-by-layer issues #18–#21.
 
 **W5 (later, own plan): hosting.**
 - Long jobs (`search_sequences`, copula Monte Carlo) run in a background job queue that the page polls.
@@ -200,9 +198,9 @@ outgrows it):
 
 ## 9. Open unknowns
 
-- **W-U1 (W1):** the inputs behind Figs 3.15 and 3.16 (the second Stage's Feature, and the two-Feature case with
+- **W-U1 (#33):** the inputs behind Figs 3.15 and 3.16 (the second Stage's Feature, and the two-Feature case with
   C^I = 6449), so those diagrams can also be checked.
-- **W-U4 (W2):** request time limit and size limits; measure `optimise_means` on the largest allowed sequence.
+- **W-U4 (#32):** request time limit and size limits; measure `optimise_means` on the largest allowed sequence.
 
 Resolved at W0: W-U2 (C10), W-U3 (C11, C13), W-U5 (C7).
 
@@ -210,4 +208,4 @@ Resolved at W0: W-U2 (C10), W-U3 (C11, C13), W-U5 (C7).
 
 1. Read `GLOSSARY.md`, `docs/spec.md` §2, §5 and §6, ADR 0005, and this document.
 2. Run `uv run pytest` in `manufacturing_oms/` to confirm a green baseline.
-3. Start the next unfinished stage (W1 first).
+3. Pick the next ticket from §8 whose blockers are all closed (#23 first).
