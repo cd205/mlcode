@@ -20,7 +20,10 @@ Notebooks for interactive experiments live in `notebooks/`. They need the opt-in
 uv sync --group notebook
 ```
 
-Then open e.g. `notebooks/single_stage_experiment.ipynb` in VS Code and pick the `.venv` kernel.
+Then open a notebook in VS Code and pick the `.venv` kernel:
+
+- `single_stage_experiment.ipynb`: one Feature, one Stage (R2).
+- `parallel_two_feature_experiment.ipynb`: two Features in one Parallel Stage (R3, R4), with correlation and a comparison against the serial arrangement (R5).
 
 ## Folders
 
