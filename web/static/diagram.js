@@ -143,7 +143,7 @@ function drawPassBars(svg, results, i, top, maxCount) {
   const x0 = STAGE.x - 70 + i * COLUMN;
   const avail = COLUMN - 20;
   const groupW = avail / Math.max(stage.passes.length, 3);
-  const barW = Math.min(18, groupW / 3.6);
+  const barW = Math.min(30, groupW / 3.6);  // wide enough for a 4-digit count above each bar
   const base = top + BARS_H + 20;
   const scale = BARS_H / Math.max(maxCount, 1);
 

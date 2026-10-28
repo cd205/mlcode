@@ -23,10 +23,11 @@ function showError(message) {
   $("error").hidden = !message;
 }
 
-function row(table, label, value, cls = "num") {
+function row(table, label, value, cls = "num", sub = false) {
   const tr = table.insertRow();
   const th = document.createElement("th");
   th.textContent = label;
+  if (sub) th.className = "sub";
   tr.appendChild(th);
   const td = tr.insertCell();
   td.className = cls;
@@ -63,10 +64,10 @@ function showResults(results) {
   row(table, "Expected Profit", money(t.expected_profit));
   row(table, "Revenue", money(t.revenue));
   row(table, "Production cost", money(t.production_cost));
-  row(table, "  processing", money(t.processing_cost));
-  row(table, "  rework", money(t.rework_cost));
-  row(table, "  scrap", money(t.scrap_cost));
-  row(table, "  inspection", money(t.inspection_cost));
+  row(table, "processing", money(t.processing_cost), "num", true);
+  row(table, "rework", money(t.rework_cost), "num", true);
+  row(table, "scrap", money(t.scrap_cost), "num", true);
+  row(table, "inspection", money(t.inspection_cost), "num", true);
   row(table, "Final Conformance", fmtProb(t.final_conformance));
   results.means.values.forEach((mu, i) => {
     row(table, `Mean Settings, Stage ${i + 1}`, Object.entries(mu).map(([n, v]) => `${n} = ${v}`).join(", "));

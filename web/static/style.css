@@ -43,6 +43,7 @@ button:disabled { opacity: 0.5; cursor: wait; }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
 td.num { text-align: right; }
+th.sub { padding-left: 24px; font-weight: 400; color: var(--muted); }
 #sequence-summary table { margin-bottom: 12px; font-size: 0.9rem; background: var(--bg); }
 #sequence-summary h3 { margin: 8px 0 4px; font-size: 0.95rem; }
 
