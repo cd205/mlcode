@@ -1,0 +1,39 @@
+{
+  "format_version": 1,
+  "name": "R5: Table 3.5, two Stages in series",
+  "selling_price": 120,
+  "stages": [
+    {
+      "features": [
+        {"name": "a", "lower": 8, "upper": 12, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1], "corr": 0},
+      "costs": {
+        "processing": 25,
+        "rework": {"a": 15},
+        "scrap": {"initial": 10, "a": 10}
+      },
+      "inspection": {"per_stage": 0, "per_feature": 0}
+    },
+    {
+      "features": [
+        {"name": "b", "lower": 13, "upper": 17, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1], "corr": 0},
+      "costs": {
+        "processing": 20,
+        "rework": {"b": 12},
+        "scrap": {"initial": 27, "b": 27}
+      },
+      "inspection": {"per_stage": 0, "per_feature": 0}
+    }
+  ],
+  "means": {"scheme": "per_feature", "values": [{"a": 10.466}, {"b": 15.591}]},
+  "reference": {
+    "source": "Table 3.5",
+    "quantity": "expected_profit",
+    "value": 71.41,
+    "tolerance": 0.005,
+    "note": "Stage 2's Scrap Cost 27 is cumulative: 10 + 17 of value added through Stage 2 (C9). The text above Table 3.5 prints 10 + 12 = 27 (D4)."
+  }
+}

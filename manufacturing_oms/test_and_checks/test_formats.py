@@ -34,6 +34,47 @@ class TestR1:
         assert 0 < stage["remaining"] < 0.5
 
 
+class TestSerialPresets:
+    """R2 (Table 3.3, one Stage) and R5 (Table 3.5, two Serial Stages) at the printed means."""
+
+    @pytest.mark.parametrize(
+        "name, value",
+        [
+            ("r2", 93.4377),  # Table 3.3 prints only μ* = 10.61; this is the closed form there
+            ("r5", 71.41),  # Table 3.5 text: "The highest profit (71.41)"
+        ],
+    )
+    def test_reproduces_the_reference_expected_profit(self, name, value):
+        reference = run(preset(name))["reference"]
+        assert reference["quantity"] == "expected_profit"
+        assert reference["value"] == value
+        assert reference["computed"] == pytest.approx(value, abs=reference["tolerance"])
+        assert reference["within_tolerance"] is True
+
+    def test_r5_reports_the_printed_means_per_stage(self):
+        assert run(preset("r5"))["means"]["values"] == [{"a": 10.466}, {"b": 15.591}]
+
+    @pytest.mark.parametrize("name", ["r2", "r5"])
+    def test_per_pass_counts_account_for_every_part_entering_each_stage(self, name):
+        results = run(preset(name), n_parts=10_000)
+        for stage in results["stages"]:
+            entering = 10_000 * stage["reach_probability"]
+            passes = stage["passes"]
+            conformed = sum(sum(p["conform"].values()) for p in passes)
+            scrapped = sum(sum(p["scrap"].values()) for p in passes)
+            assert conformed + scrapped + stage["remaining"] == pytest.approx(entering, rel=1e-12)
+            assert conformed == pytest.approx(entering * stage["final_conformance"], abs=0.5)
+
+    def test_r5_second_stage_is_reached_by_the_first_stages_conforming_parts(self):
+        first, second = run(preset("r5"))["stages"]
+        assert second["reach_probability"] == pytest.approx(first["final_conformance"], rel=1e-15)
+        assert 0.9 < second["reach_probability"] < 1
+
+    @pytest.mark.parametrize("name", ["r2", "r5"])
+    def test_round_trips(self, name):
+        assert dump_sequence(load_sequence(preset(name))) == preset(name)
+
+
 def stage_doc(name, lower, upper, side="upper", sigma=1.0, pc=0.0, rc=0.0, sc=0.0):
     reworkable = side != "none"
     return {

@@ -93,6 +93,9 @@ function drawStage(svg, sequence, results, i) {
     arrow(svg, [[20, midY], [x - 2, midY]], "processing",
       `${fmtCount(entering)} parts start Stage 1\nReach Probability ${fmtProb(stage.reach_probability)}`);
     text(svg, 24, midY - 8, `N = ${fmtCount(results.n_parts)}`, { class: "label" });
+  } else {
+    text(svg, x - 8, midY + 16, `${fmtCount(entering)} parts`, { class: "label", "text-anchor": "end",
+      "data-tip": `${entering.toFixed(1)} expected parts start Stage ${i + 1}\nReach Probability ${fmtProb(stage.reach_probability)}` });
   }
 
   const visits = Object.entries(stage.visits).map(([s, v]) => `visits to ${s}: ${v.toFixed(5)}`).join("\n");
@@ -138,16 +141,19 @@ function drawStage(svg, sequence, results, i) {
   return y + REWORK.dy + Math.max(reworkStates.length, 1) * REWORK.gap;
 }
 
+// Bars share one scale across Stages, so a later Stage's bars shrink with its Reach Probability.
 function drawPassBars(svg, results, i, top, maxCount) {
   const stage = results.stages[i];
+  const entering = results.n_parts * stage.reach_probability;
   const x0 = STAGE.x - 70 + i * COLUMN;
   const avail = COLUMN - 20;
   const groupW = avail / Math.max(stage.passes.length, 3);
   const barW = Math.min(30, groupW / 3.6);  // wide enough for a 4-digit count above each bar
-  const base = top + BARS_H + 20;
+  const base = top + BARS_H + 36;  // room for the header, its subtitle and the tallest bar's count
   const scale = BARS_H / Math.max(maxCount, 1);
 
   text(svg, x0, top, `Stage ${i + 1}: expected parts per Pass`, { "font-weight": 600 });
+  text(svg, x0, top + 15, `${fmtCount(entering)} enter (r = ${fmtProb(stage.reach_probability)})`, { class: "label" });
   el("line", { x1: x0, x2: x0 + avail, y1: base, y2: base, stroke: "var(--grid)" }, svg);
 
   stage.passes.forEach((pass, k) => {

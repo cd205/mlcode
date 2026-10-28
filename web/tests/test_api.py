@@ -44,6 +44,24 @@ def test_evaluate_r1_matches_its_reference_and_fig_3_14():
     assert conform == [9545, 217, 5]
 
 
+@pytest.mark.parametrize("preset_id, n_stages", [("r2", 1), ("r5", 2)])
+def test_evaluate_serial_presets_match_their_references(preset_id, n_stages):
+    sequence = client.get(f"/api/presets/{preset_id}").json()
+    response = client.post("/api/evaluate", json={"sequence": sequence, "n_parts": 10_000})
+    assert response.status_code == 200
+    results = response.json()
+    assert results["reference"]["within_tolerance"] is True
+    assert len(results["stages"]) == n_stages
+    for stage in results["stages"]:
+        closed = sum(sum(p[kind].values()) for p in stage["passes"] for kind in ("conform", "scrap"))
+        assert closed + stage["remaining"] == pytest.approx(10_000 * stage["reach_probability"], rel=1e-12)
+
+
+def test_presets_lists_the_serial_presets():
+    ids = {p["id"] for p in client.get("/api/presets").json()}
+    assert {"r1", "r2", "r5"} <= ids
+
+
 def assert_readable_error(response, status, *fragments):
     assert response.status_code == status
     detail = response.json()["detail"]
