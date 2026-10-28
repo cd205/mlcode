@@ -53,8 +53,27 @@ function showSequence(seq) {
         tr.insertCell().textContent = v;
       }
     });
-    wrap.append(h, table);
+    const corr = document.createElement("p");
+    corr.className = "muted";
+    corr.textContent = `Correlation ${stage.variation.corr ?? 0} · Processing Cost ${stage.costs.processing}`;
+    wrap.append(h, table, corr, costTable(stage.costs));
   });
+}
+
+// One row per state, or per Feature for the shortcut (C8). Scrap Costs are cumulative (C9).
+function costTable(costs) {
+  const [keyLabel, rework, scrap] = "rework_per_feature" in costs
+    ? ["Feature", costs.rework_per_feature, costs.scrap_per_feature]
+    : ["State", costs.rework, costs.scrap];
+  const table = document.createElement("table");
+  table.createTHead().innerHTML = `<tr><th>${keyLabel}</th><th>Rework Cost</th>` +
+    "<th>Scrap Cost (includes value added in earlier Stages)</th></tr>";
+  const body = table.createTBody();
+  for (const key of Object.keys(scrap)) {
+    const tr = body.insertRow();
+    for (const v of [key, rework[key] ?? "–", scrap[key]]) tr.insertCell().textContent = v;
+  }
+  return table;
 }
 
 function showResults(results) {

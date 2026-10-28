@@ -1,0 +1,28 @@
+{
+  "format_version": 1,
+  "name": "R3: Table 3.1, two Features in parallel, Scrap Cost by state",
+  "selling_price": 120,
+  "stages": [
+    {
+      "features": [
+        {"name": "a", "lower": 8, "upper": 12, "rework_side": "upper"},
+        {"name": "b", "lower": 13, "upper": 17, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1, 1], "corr": 0},
+      "costs": {
+        "processing": 45,
+        "rework": {"a": 15, "b": 12, "a+b": 20},
+        "scrap": {"initial": 8, "a": 9, "b": 11, "a+b": 14}
+      },
+      "inspection": {"per_stage": 0, "per_feature": 0}
+    }
+  ],
+  "means": {"scheme": "per_feature", "values": [{"a": 10.5115, "b": 15.5651}]},
+  "reference": {
+    "source": "Table 3.1",
+    "quantity": "expected_profit",
+    "value": 71.4287,
+    "tolerance": 0.00005,
+    "note": "The Eq 3.44 cost formula. Table 3.1 also prints the Khasawneh & Bowling 2008 formula (71.1592), which the engine keeps as a test oracle only (D7)."
+  }
+}

@@ -97,8 +97,8 @@ R4 (one Parallel Stage, two Features), with full cost tables (C8):
 
 R5 (two Serial Stages) is the same shape with two entries in `stages`, one Feature each.
 
-- **Features**: names match `[A-Za-z0-9_]{1,16}` and are unique across the Sequence; `rework_side` is
-  `upper`, `lower` or `none` (C7).
+- **Features**: names match `[A-Za-z0-9_]{1,16}`, are not `initial` (the Initial State's key) and are unique across
+  the Sequence; `rework_side` is `upper`, `lower` or `none` (C7).
 - **States**: `"initial"` and `+`-joined Feature names; parsing ignores order (C7).
 - **Costs**: full tables as above, or `{"processing", "rework_per_feature", "scrap_per_feature"}`; Scrap Costs
   are cumulative (C8, C9).

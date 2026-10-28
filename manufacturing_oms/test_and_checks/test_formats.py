@@ -75,6 +75,163 @@ class TestSerialPresets:
         assert dump_sequence(load_sequence(preset(name))) == preset(name)
 
 
+class TestParallelPresets:
+    """R3 (Table 3.1) and R4 (Table 3.7): one Parallel Stage of two Features, at the printed means."""
+
+    @pytest.mark.parametrize(
+        "name, value",
+        [
+            ("r3", 71.4287),  # Table 3.1, Eq 3.44 cost formula
+            ("r4", 71.17),  # Table 3.7
+        ],
+    )
+    def test_reproduces_the_reference_expected_profit(self, name, value):
+        reference = run(preset(name))["reference"]
+        assert reference["quantity"] == "expected_profit"
+        assert reference["value"] == value
+        assert reference["computed"] == pytest.approx(value, abs=reference["tolerance"])
+        assert reference["within_tolerance"] is True
+
+    @pytest.mark.parametrize("name", ["r3", "r4"])
+    def test_per_pass_counts_are_split_by_rework_state_and_close(self, name):
+        stage = run(preset(name), n_parts=10_000)["stages"][0]
+        first = stage["passes"][0]
+        assert set(first["conform"]) == {"initial"}
+        assert set(first["rework"]) == {"a", "b", "a+b"}
+        assert set(stage["passes"][1]["conform"]) == {"a", "b", "a+b"}
+        conformed = sum(sum(p["conform"].values()) for p in stage["passes"])
+        scrapped = sum(sum(p["scrap"].values()) for p in stage["passes"])
+        assert conformed + scrapped + stage["remaining"] == pytest.approx(10_000, rel=1e-12)
+        assert conformed == pytest.approx(10_000 * stage["final_conformance"], abs=0.5)
+
+    @pytest.mark.parametrize("name", ["r3", "r4"])
+    def test_round_trips(self, name):
+        assert dump_sequence(load_sequence(preset(name))) == preset(name)
+
+
+def r4_with_costs(costs):
+    doc = preset("r4")
+    doc["stages"][0]["costs"] = costs
+    return doc
+
+
+R4_SHORTCUT = {"processing": 45, "rework_per_feature": {"a": 15, "b": 12}, "scrap_per_feature": {"a": 10, "b": 17}}
+
+
+class TestCostShortcut:
+    """C8: per-Feature costs build the additive tables (Table 3.7); never mixed with full tables."""
+
+    def test_gives_the_same_results_as_the_full_tables(self):
+        assert run(r4_with_costs(R4_SHORTCUT)) == run(preset("r4"))
+
+    def test_is_dumped_as_full_tables(self):
+        assert dump_sequence(load_sequence(r4_with_costs(R4_SHORTCUT))) == preset("r4")
+
+    @pytest.mark.parametrize(
+        "costs, message",
+        [
+            ({**R4_SHORTCUT, "rework": {"a": 15, "b": 12, "a+b": 27}},
+             "stages[0].costs: give either rework and scrap tables or rework_per_feature and scrap_per_feature"),
+            ({"processing": 45, "rework_per_feature": {"a": 15, "b": 12}},
+             "stages[0].costs: missing scrap_per_feature"),
+            ({**R4_SHORTCUT, "scrap_per_feature": {"a": 10}},
+             "stages[0].costs.scrap_per_feature: need a cost for exactly ['a', 'b'], got ['a']"),
+            ({**R4_SHORTCUT, "rework_per_feature": {"a": 15, "c": 1}},
+             "stages[0].costs.rework_per_feature: need a cost for exactly the reworkable Features ['a', 'b'], "
+             "got ['a', 'c']"),
+            ({**R4_SHORTCUT, "scrap": 27}, "stages[0].costs: give either"),
+            ({**R4_SHORTCUT, "rework_costs": {}}, "stages[0].costs: unknown field rework_costs"),
+            ({"processing": 45, "rework": {}, "scrap": {}, "extra": 1}, "stages[0].costs: unknown field extra"),
+            ({**R4_SHORTCUT, "rework_per_feature": {"a": -1, "b": 12}},
+             "stages[0].costs.rework_per_feature.a: must be non-negative"),
+        ],
+    )
+    def test_rejects_bad_shortcuts(self, costs, message):
+        with pytest.raises(ValueError) as error:
+            load_sequence(r4_with_costs(costs))
+        assert str(error.value).startswith(message)
+
+    def test_a_feature_without_rework_has_no_rework_cost(self):
+        doc = r4_with_costs({**R4_SHORTCUT, "rework_per_feature": {"a": 15}})
+        doc["stages"][0]["features"][1]["rework_side"] = "none"
+        costs = dump_sequence(load_sequence(doc))["stages"][0]["costs"]
+        assert costs["rework"] == {"a": 15}
+        assert costs["scrap"] == {"initial": 27, "a": 27}
+
+
+class TestStateKeys:
+    """C7: "initial" and Feature names joined by '+'; order ignored when parsing, Feature order when writing."""
+
+    def test_parsing_ignores_the_order_of_feature_names(self):
+        doc = r4_with_costs({"processing": 45, "rework": {"b+a": 27, "b": 12, "a": 15},
+                             "scrap": {"a+b": 27, "b": 27, "initial": 27, "a": 27}})
+        assert run(doc) == run(preset("r4"))
+        assert dump_sequence(load_sequence(doc)) == preset("r4")
+
+    @pytest.mark.parametrize(
+        "table, keys, message",
+        [
+            ("rework", {"a": 15, "b": 12}, "stages[0].costs.rework: missing state a+b"),
+            ("scrap", {"a": 27, "b": 27, "a+b": 27}, "stages[0].costs.scrap: missing state initial"),
+            ("rework", {"initial": 0, "a": 15, "b": 12, "a+b": 27}, "stages[0].costs.rework: unexpected state initial"),
+            ("rework", {"a": 15, "b": 12, "a+b": 27, "b+a": 27}, "stages[0].costs.rework: state 'b+a' is given twice"),
+            ("rework", {"a": 15, "b": 12, "a+c": 27}, "stages[0].costs.rework: state key 'a+c' must be"),
+            ("rework", {"a": 15, "b": 12, "a+a": 27}, "stages[0].costs.rework: state key 'a+a' must be"),
+            ("scrap", {"Initial": 27, "a": 27, "b": 27, "a+b": 27}, "stages[0].costs.scrap: state key 'Initial'"),
+        ],
+    )
+    def test_wrong_or_missing_state_keys_are_rejected(self, table, keys, message):
+        doc = preset("r4")
+        doc["stages"][0]["costs"][table] = keys
+        with pytest.raises(ValueError) as error:
+            load_sequence(doc)
+        assert str(error.value).startswith(message)
+
+    def test_a_feature_without_rework_has_no_rework_states(self):
+        doc = preset("r4")
+        doc["stages"][0]["features"][1]["rework_side"] = "none"
+        with pytest.raises(ValueError) as error:
+            load_sequence(doc)
+        assert str(error.value).startswith("stages[0].costs.rework: unexpected states b, a+b")
+
+    @pytest.mark.parametrize(
+        "name, message",
+        [
+            ("a+b", "stages[0].features[1].name: Feature names are 1 to 16 letters, digits or underscores"),
+            ("initial", "stages[0].features[1].name: 'initial' is reserved"),
+            ("a", "stages[0]: Feature names must be unique within a Stage"),
+        ],
+    )
+    def test_bad_feature_names_are_rejected(self, name, message):
+        doc = preset("r4")
+        doc["stages"][0]["features"][1]["name"] = name
+        with pytest.raises(ValueError) as error:
+            load_sequence(doc)
+        assert str(error.value).startswith(message)
+
+    def test_feature_names_must_be_unique_across_stages(self):
+        doc = sequence_doc([stage_doc("a", 8.0, 12.0), stage_doc("a", 13.0, 17.0)], [{"a": 10.5}, {"a": 15.6}])
+        with pytest.raises(ValueError) as error:
+            load_sequence(doc)
+        assert str(error.value).startswith("stages: Feature names must be unique across a Sequence's Stages")
+
+
+class TestCorrelation:
+    """A scalar correlation per Stage (C11)."""
+
+    def test_round_trips_and_changes_the_result(self):
+        doc = preset("r4")
+        doc["stages"][0]["variation"]["corr"] = 0.5
+        assert dump_sequence(load_sequence(doc)) == doc
+        assert run(doc)["totals"]["expected_profit"] != pytest.approx(run(preset("r4"))["totals"]["expected_profit"])
+
+    def test_out_of_range_is_rejected(self):
+        doc = preset("r4")
+        doc["stages"][0]["variation"]["corr"] = 1.5
+        with pytest.raises(ValueError, match=r"^stages\[0\]\.variation: "):
+            load_sequence(doc)
+
+
 def stage_doc(name, lower, upper, side="upper", sigma=1.0, pc=0.0, rc=0.0, sc=0.0):
     reworkable = side != "none"
     return {
@@ -165,7 +322,7 @@ class TestMalformedInput:
             (("stages", 0, "variation", "sigmas"), [1, 1], "stages[0].variation.sigmas: need one per Feature"),
             (("stages", 0, "variation", "sigmas"), [0], "stages[0].variation: standard deviations must be positive"),
             (("stages", 0, "costs", "rework"), {"y": 0}, "stages[0].costs.rework: state key 'y'"),
-            (("stages", 0, "costs", "scrap"), {"initial": 0}, "stages[0]: scrap costs must cover exactly"),
+            (("stages", 0, "costs", "scrap"), {"initial": 0}, "stages[0].costs.scrap: missing state x"),
             (("means", "scheme"), "per_state", "means.scheme: only 'per_feature' is supported"),
             (("means", "values", 0), {"y": 5}, "means.values[0]: need a mean for exactly ['x']"),
             (("reference", "quantity"), "profit", "reference.quantity: must be one of"),

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypeVar, get_args
 
 from oms.distributions.normal import MultivariateNormal
-from oms.markov.states import INITIAL_STATE, State
+from oms.markov.states import INITIAL_STATE, State, enumerate_states
 from oms.model.costs import CostTable, InspectionCost
 from oms.model.feature import Feature, ReworkSide
 from oms.model.means import MeanSettings
@@ -24,6 +24,8 @@ FEATURE_NAME = re.compile(r"[A-Za-z0-9_]{1,16}")
 Quantity = Literal["expected_profit", "final_conformance", "production_cost"]  # ProfitBreakdown attributes
 REFERENCE_QUANTITIES: tuple[Quantity, ...] = get_args(Quantity)
 INITIAL_KEY = "initial"
+FULL_COSTS = ("rework", "scrap")
+SHORTCUT_COSTS = ("rework_per_feature", "scrap_per_feature")  # C8
 
 Json = dict[str, Any]
 T = TypeVar("T")
@@ -110,8 +112,10 @@ def _load_stage(data: object, path: str) -> Stage:
     features_data = _list(doc["features"], f"{path}.features")
     features = tuple(_load_feature(f, f"{path}.features[{i}]") for i, f in enumerate(features_data))
     names = tuple(f.name for f in features)
+    if len(set(names)) != len(names):
+        raise ValueError(f"{path}: Feature names must be unique within a Stage, got {list(names)}")
     variation = _load_variation(doc["variation"], f"{path}.variation", len(features))
-    costs = _load_costs(doc["costs"], f"{path}.costs", names)
+    costs = _load_costs(doc["costs"], f"{path}.costs", features)
     inspection = _load_inspection(doc.get("inspection", {}), f"{path}.inspection")
     return _at_path(lambda: Stage(features=features, variation=variation, costs=costs, inspection=inspection), path)
 
@@ -121,6 +125,8 @@ def _load_feature(data: object, path: str) -> Feature:
     name = _string(doc["name"], f"{path}.name")
     if not FEATURE_NAME.fullmatch(name):
         raise ValueError(f"{path}.name: Feature names are 1 to 16 letters, digits or underscores, got {name!r}")
+    if name == INITIAL_KEY:
+        raise ValueError(f"{path}.name: {INITIAL_KEY!r} is reserved for the Initial State's key")
     sides = [s.value for s in ReworkSide]
     if doc["rework_side"] not in sides:
         raise ValueError(f"{path}.rework_side: must be one of {sides}, got {doc['rework_side']!r}")
@@ -143,20 +149,51 @@ def _load_variation(data: object, path: str, n_features: int) -> MultivariateNor
     return _at_path(lambda: MultivariateNormal(sigmas, corr), path)
 
 
-def _load_costs(data: object, path: str, names: tuple[str, ...]) -> CostTable:
-    doc = _object(data, path, required={"processing", "rework", "scrap"})
+def _load_costs(data: object, path: str, features: tuple[Feature, ...]) -> CostTable:
+    """Full state tables, or the per-Feature shortcut for `CostTable.additive` (C8), never both."""
+    names = tuple(f.name for f in features)
+    states = enumerate_states(features)
+    keys = set(_object(data, path))
+    shortcut = bool(keys & set(SHORTCUT_COSTS))
+    if shortcut and keys & set(FULL_COSTS):
+        raise ValueError(f"{path}: give either rework and scrap tables or rework_per_feature and "
+                         f"scrap_per_feature, not a mix")
+    if shortcut:
+        doc = _object(data, path, required={"processing", *SHORTCUT_COSTS}, optional=())
+        reworkable = [f.name for f in features if f.reworkable]
+        rework = _per_feature(doc["rework_per_feature"], f"{path}.rework_per_feature", reworkable,
+                              "the reworkable Features")
+        scrap = _per_feature(doc["scrap_per_feature"], f"{path}.scrap_per_feature", list(names))
+        return _at_path(lambda: CostTable.additive(_cost(doc["processing"], f"{path}.processing"), rework, scrap),
+                        path)
+    doc = _object(data, path, required={"processing", *FULL_COSTS}, optional=())
     return _at_path(lambda: CostTable(processing=_cost(doc["processing"], f"{path}.processing"),
-                                   rework=_state_table(doc["rework"], f"{path}.rework", names),
-                                   scrap=_state_table(doc["scrap"], f"{path}.scrap", names)), path)
+                                   rework=_state_table(doc["rework"], f"{path}.rework", states[1:], names),
+                                   scrap=_state_table(doc["scrap"], f"{path}.scrap", states, names)), path)
 
 
-def _state_table(data: object, path: str, names: tuple[str, ...]) -> dict[State, float]:
+def _per_feature(data: object, path: str, names: list[str], described_as: str = "") -> dict[str, float]:
+    costs = {name: _cost(value, f"{path}.{name}") for name, value in _object(data, path).items()}
+    if set(costs) != set(names):
+        expected = f"{described_as} {names}" if described_as else str(names)
+        raise ValueError(f"{path}: need a cost for exactly {expected}, got {sorted(costs)}")
+    return costs
+
+
+def _state_table(data: object, path: str, states: tuple[State, ...], names: tuple[str, ...]) -> dict[State, float]:
+    """A cost for each of `states`, keyed as in C7; missing or extra states are named by their keys."""
     table: dict[State, float] = {}
     for key, value in _object(data, path).items():
         state = _parse_state(key, path, names)
         if state in table:
             raise ValueError(f"{path}: state {key!r} is given twice")
         table[state] = _cost(value, f"{path}.{key}")
+    for label, wrong in (("missing", [s for s in states if s not in table]),
+                         ("unexpected", [s for s in table if s not in states])):
+        if wrong:
+            raise ValueError(f"{path}: {label} state{'s' if len(wrong) > 1 else ''} "
+                             f"{', '.join(state_key(s, names) for s in wrong)}; this Stage's states are "
+                             f"{[state_key(s, names) for s in states]}")
     return table
 
 

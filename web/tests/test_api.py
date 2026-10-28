@@ -44,8 +44,8 @@ def test_evaluate_r1_matches_its_reference_and_fig_3_14():
     assert conform == [9545, 217, 5]
 
 
-@pytest.mark.parametrize("preset_id, n_stages", [("r2", 1), ("r5", 2)])
-def test_evaluate_serial_presets_match_their_references(preset_id, n_stages):
+@pytest.mark.parametrize("preset_id, n_stages", [("r2", 1), ("r3", 1), ("r4", 1), ("r5", 2)])
+def test_evaluate_presets_match_their_references(preset_id, n_stages):
     sequence = client.get(f"/api/presets/{preset_id}").json()
     response = client.post("/api/evaluate", json={"sequence": sequence, "n_parts": 10_000})
     assert response.status_code == 200
@@ -57,9 +57,9 @@ def test_evaluate_serial_presets_match_their_references(preset_id, n_stages):
         assert closed + stage["remaining"] == pytest.approx(10_000 * stage["reach_probability"], rel=1e-12)
 
 
-def test_presets_lists_the_serial_presets():
+def test_presets_lists_the_serial_and_parallel_presets():
     ids = {p["id"] for p in client.get("/api/presets").json()}
-    assert {"r1", "r2", "r5"} <= ids
+    assert {"r1", "r2", "r3", "r4", "r5"} <= ids
 
 
 def assert_readable_error(response, status, *fragments):
@@ -69,6 +69,28 @@ def assert_readable_error(response, status, *fragments):
     assert "Traceback" not in detail and ".py" not in detail
     for fragment in fragments:
         assert fragment in detail
+
+
+def test_parallel_stage_reports_passes_by_rework_state():
+    sequence = client.get("/api/presets/r4").json()
+    results = client.post("/api/evaluate", json={"sequence": sequence}).json()
+    stage = results["stages"][0]
+    assert set(stage["visits"]) == {"initial", "a", "b", "a+b"}
+    assert set(stage["passes"][0]["rework"]) == {"a", "b", "a+b"}
+
+
+def test_cost_shortcut_mixed_with_a_full_table_is_422():
+    sequence = client.get("/api/presets/r4").json()
+    sequence["stages"][0]["costs"]["rework_per_feature"] = {"a": 15, "b": 12}
+    response = client.post("/api/evaluate", json={"sequence": sequence})
+    assert_readable_error(response, 422, "stages[0].costs", "not a mix")
+
+
+def test_missing_state_key_is_422_naming_the_state():
+    sequence = client.get("/api/presets/r4").json()
+    del sequence["stages"][0]["costs"]["rework"]["a+b"]
+    response = client.post("/api/evaluate", json={"sequence": sequence})
+    assert_readable_error(response, 422, "stages[0].costs.rework", "missing state a+b")
 
 
 def test_request_without_a_sequence_is_422_with_a_readable_message():

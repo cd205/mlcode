@@ -10,7 +10,7 @@ const KINDS = ["conform", "rework", "scrap"];
 const COLUMN = 330;               // horizontal space per Stage
 const STAGE = { x: 110, y: 50, w: 140, h: 60 };
 const SINK = { dx: 200, w: 100, h: 46 };
-const REWORK = { dy: 130, w: 100, h: 40, gap: 54 };
+const REWORK = { dy: 130, w: 80, h: 40, gap: 54 };
 const BARS_H = 130;               // tallest bar
 
 const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
@@ -126,17 +126,21 @@ function drawStage(svg, sequence, results, i) {
   box(svg, x + SINK.dx, scrapY, SINK.w, SINK.h, COLOUR.scrap, ["Scrap", fmtCount(scrapCount)],
     `Scrap: ${scrapCount.toFixed(1)} expected parts\nScrap probability ${fmtProb(stage.scrap_probability)}`);
 
-  // One rework loop per Rework State: down into the Rework box, back up into the Stage.
+  // One Rework box per Rework State (Fig 3.5), stacked under the Stage: a branch off the left trunk leads into
+  // each box, and a branch from each box joins the right trunk back up into the Stage. A single Feature has one
+  // box, its one Rework State (Fig 3.12).
   const reworkStates = Object.keys(stage.transitions).filter((s) => s !== "initial");
+  const down = x + 8, up = x + w - 8, bx = x + (w - REWORK.w) / 2;
   reworkStates.forEach((state, j) => {
     const by = y + REWORK.dy + j * REWORK.gap;
-    const bx = x + (w - REWORK.w) / 2;
+    const my = by + REWORK.h / 2;
     const count = totalOver(stage, "rework", (s) => s === state);
     const tip = transitionTip(`Rework → ${state}`, stage, (t) => t.rework[state] ?? 0, count);
-    arrow(svg, [[x + 30, y + h], [x + 30, by - 2]], "rework", tip);
-    arrow(svg, [[x + w - 30, by], [x + w - 30, y + h + 2]], "processing", `Reworked ${state} parts return to Stage ${i + 1}`);
-    text(svg, x + 36, y + h + 22, `R ${fmtProb(stage.transitions.initial.rework[state] ?? 0)}`, { class: "label" });
-    box(svg, bx, by, REWORK.w, REWORK.h, COLOUR.rework, [`Rework ${state}`], tip);
+    arrow(svg, [[down, y + h], [down, my], [bx - 2, my]], "rework", tip);
+    arrow(svg, [[bx + REWORK.w, my], [up, my], [up, y + h + 2]], "processing",
+      `Reworked ${state} parts return to Stage ${i + 1}`);
+    box(svg, bx, by, REWORK.w, REWORK.h, COLOUR.rework,
+      [`Rework ${state}`, `R ${fmtProb(stage.transitions.initial.rework[state] ?? 0)}`], tip);
   });
   return y + REWORK.dy + Math.max(reworkStates.length, 1) * REWORK.gap;
 }
