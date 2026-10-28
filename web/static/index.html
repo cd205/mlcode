@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OMS Sequence Builder</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header>
+    <h1>OMS Sequence Builder</h1>
+    <p class="muted">Optimal Mean Setting for manufacturing with rework and scrap. The model runs on the server.</p>
+  </header>
+  <main>
+    <section id="inputs" class="panel">
+      <label>Preset
+        <select id="preset"></select>
+      </label>
+      <p id="preset-description" class="muted"></p>
+      <div id="sequence-summary"></div>
+      <label>N parts started
+        <input id="n-parts" type="number" value="10000" min="1" step="1">
+      </label>
+      <button id="evaluate" type="button">Evaluate</button>
+    </section>
+    <section id="outputs" class="panel">
+      <div id="error" role="alert" hidden></div>
+      <div id="diagram-wrap">
+        <svg id="diagram" role="img" aria-label="Flow diagram of the Sequence"></svg>
+        <div id="tooltip" hidden></div>
+      </div>
+      <table id="results" hidden></table>
+    </section>
+  </main>
+</body>
+</html>

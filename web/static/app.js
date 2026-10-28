@@ -1,0 +1,140 @@
+// The page (web_app_plan.md §7): pick a preset, Evaluate it on the server, draw the diagram and the results table.
+
+import { attachTooltip, drawDiagram, fmtProb } from "./diagram.js";
+
+const $ = (id) => document.getElementById(id);
+let sequence = null;
+
+// Calls the API; a failed call throws an Error carrying the server's readable message (C18).
+async function api(path, options) {
+  let response;
+  try {
+    response = await fetch(path, options);
+  } catch {
+    throw new Error("Could not reach the server. Is it running?");
+  }
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.detail ?? `${response.status} ${response.statusText}`);
+  return body;
+}
+
+function showError(message) {
+  $("error").textContent = message ?? "";
+  $("error").hidden = !message;
+}
+
+function row(table, label, value, cls = "num") {
+  const tr = table.insertRow();
+  const th = document.createElement("th");
+  th.textContent = label;
+  tr.appendChild(th);
+  const td = tr.insertCell();
+  td.className = cls;
+  if (value instanceof Node) td.appendChild(value); else td.textContent = value;
+  return tr;
+}
+
+const money = (x) => x.toFixed(2);
+
+function showSequence(seq) {
+  const wrap = $("sequence-summary");
+  wrap.replaceChildren();
+  seq.stages.forEach((stage, i) => {
+    const h = document.createElement("h3");
+    h.textContent = `Stage ${i + 1}`;
+    const table = document.createElement("table");
+    table.createTHead().innerHTML = "<tr><th>Feature</th><th>L</th><th>U</th><th>Rework Side</th><th>σ</th><th>Mean Setting</th></tr>";
+    const body = table.createTBody();
+    stage.features.forEach((f, j) => {
+      const tr = body.insertRow();
+      const mean = seq.means.values[i]?.[f.name];
+      for (const v of [f.name, f.lower, f.upper, f.rework_side, stage.variation.sigmas[j], mean ?? "–"]) {
+        tr.insertCell().textContent = v;
+      }
+    });
+    wrap.append(h, table);
+  });
+}
+
+function showResults(results) {
+  const table = $("results");
+  table.replaceChildren();
+  const t = results.totals;
+  row(table, "Expected Profit", money(t.expected_profit));
+  row(table, "Revenue", money(t.revenue));
+  row(table, "Production cost", money(t.production_cost));
+  row(table, "  processing", money(t.processing_cost));
+  row(table, "  rework", money(t.rework_cost));
+  row(table, "  scrap", money(t.scrap_cost));
+  row(table, "  inspection", money(t.inspection_cost));
+  row(table, "Final Conformance", fmtProb(t.final_conformance));
+  results.means.values.forEach((mu, i) => {
+    row(table, `Mean Settings, Stage ${i + 1}`, Object.entries(mu).map(([n, v]) => `${n} = ${v}`).join(", "));
+  });
+
+  const ref = results.reference;
+  if (ref) {
+    const cell = document.createElement("span");
+    const verdict = document.createElement("span");
+    verdict.className = ref.within_tolerance ? "ok" : "gap";
+    verdict.textContent = ref.within_tolerance ? " ✓" : ` ✗ gap ${ref.difference >= 0 ? "+" : ""}${ref.difference.toPrecision(3)}`;
+    cell.append(`${ref.quantity} ${ref.computed.toFixed(5)} vs ${ref.value} ± ${ref.tolerance}`, verdict);
+    row(table, `Engine vs thesis (${ref.source})`, cell);
+    if (ref.note) row(table, "Note", ref.note, "");
+  }
+  table.hidden = false;
+}
+
+async function loadPreset(id) {
+  showError(null);
+  try {
+    sequence = await api(`/api/presets/${encodeURIComponent(id)}`);
+    showSequence(sequence);
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+async function evaluate() {
+  const evaluated = sequence;  // the preset may change while the request is in flight
+  if (!evaluated) return;
+  showError(null);
+  $("evaluate").disabled = true;
+  try {
+    const nParts = Number($("n-parts").value);
+    const results = await api("/api/evaluate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sequence: evaluated, n_parts: nParts }),
+    });
+    drawDiagram($("diagram"), evaluated, results);
+    showResults(results);
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    $("evaluate").disabled = false;
+  }
+}
+
+async function init() {
+  attachTooltip($("diagram"), $("tooltip"));
+  $("evaluate").addEventListener("click", evaluate);
+  $("preset").addEventListener("change", (e) => {
+    const option = e.target.selectedOptions[0];
+    $("preset-description").textContent = option?.dataset.description ?? "";
+    loadPreset(e.target.value);
+  });
+  try {
+    const presets = await api("/api/presets");
+    for (const p of presets) {
+      const option = new Option(p.name, p.id);
+      option.dataset.description = p.description;
+      $("preset").add(option);
+    }
+    if (presets.length) $("preset").dispatchEvent(new Event("change"));
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+init();
