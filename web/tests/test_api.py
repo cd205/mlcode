@@ -44,7 +44,11 @@ def test_evaluate_r1_matches_its_reference_and_fig_3_14():
     assert conform == [9545, 217, 5]
 
 
-@pytest.mark.parametrize("preset_id, n_stages", [("r2", 1), ("r3", 1), ("r4", 1), ("r5", 2)])
+R8_STAGES = {"r8-seq1": 4, "r8-seq2": 3, "r8-seq3": 3, "r8-seq4": 3, "r8-seq5": 2, "r8-seq6": 2, "r8-seq7": 2,
+             "r8-seq8": 1}
+
+
+@pytest.mark.parametrize("preset_id, n_stages", [("r2", 1), ("r3", 1), ("r4", 1), ("r5", 2), *R8_STAGES.items()])
 def test_evaluate_presets_match_their_references(preset_id, n_stages):
     sequence = client.get(f"/api/presets/{preset_id}").json()
     response = client.post("/api/evaluate", json={"sequence": sequence, "n_parts": 10_000})
@@ -90,6 +94,11 @@ def test_optimise_with_an_unknown_objective_is_422():
 def test_presets_lists_the_serial_and_parallel_presets():
     ids = {p["id"] for p in client.get("/api/presets").json()}
     assert {"r1", "r2", "r3", "r4", "r5"} <= ids
+
+
+def test_presets_lists_the_eight_inspection_placements_in_order():
+    ids = [p["id"] for p in client.get("/api/presets").json()]
+    assert [i for i in ids if i.startswith("r8-")] == list(R8_STAGES)
 
 
 def assert_readable_error(response, status, *fragments):

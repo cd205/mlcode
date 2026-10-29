@@ -163,7 +163,8 @@ outgrows it):
 - **Diagram**: Stages left to right, joined by the conforming flow; for a multi-Feature Stage, one Rework box per
   Rework State (Fig 3.5); for a single Feature, a rework loop (Fig 3.12); Conform and Scrap sinks; per-Pass bars
   beside each Stage. Colours as in the notebooks: aqua = conform, blue = rework, orange = scrap, grey =
-  processing. Hover shows counts and probabilities.
+  processing. Hover shows counts and probabilities. More than 3 Rework States (up to 15 for 4 Features) are
+  drawn as compact boxes; the diagram is never scaled above 1:1 or below 0.75, and scrolls sideways past that.
 - The edited sequence can be downloaded and uploaded as JSON.
 
 ## 8. Staged plan

@@ -9,8 +9,10 @@ const KINDS = ["conform", "rework", "scrap"];
 
 const COLUMN = 330;               // horizontal space per Stage
 const STAGE = { x: 110, y: 50, w: 140, h: 60 };
-const SINK = { dx: 200, w: 100, h: 46 };
-const REWORK = { dy: 130, w: 80, h: 40, gap: 54 };
+const SINK = { dx: 212, w: 100, h: 46 };  // clear of the "C 0.12345" label after the Stage
+const REWORK = { dy: 130, w: 80, h: 40, gap: 54, lineHeight: 15 };
+const REWORK_COMPACT = { ...REWORK, w: 100, h: 32, gap: 38, lineHeight: 12 };  // more than 3 Rework States: up to 15, for 4 Features
+const MIN_SCALE = 0.75;           // below this the diagram scrolls sideways instead of shrinking its text
 const BARS_H = 130;               // tallest bar
 
 const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
@@ -45,11 +47,11 @@ function arrow(parent, points, kind, tip) {
   return g;
 }
 
-function box(parent, x, y, w, h, fill, lines, tip) {
+function box(parent, x, y, w, h, fill, lines, tip, lineHeight = REWORK.lineHeight) {
   const g = el("g", { "data-tip": tip }, parent);
   el("rect", { x, y, width: w, height: h, rx: 6, fill, stroke: "var(--ink)", "stroke-width": 1 }, g);
   lines.forEach((line, i) => {
-    text(g, x + w / 2, y + h / 2 + (i - (lines.length - 1) / 2) * 15 + 4, line,
+    text(g, x + w / 2, y + h / 2 + (i - (lines.length - 1) / 2) * lineHeight + 4, line,
       { "text-anchor": "middle", "font-weight": i === 0 ? 600 : 400 });
   });
   return g;
@@ -128,21 +130,25 @@ function drawStage(svg, sequence, results, i) {
 
   // One Rework box per Rework State (Fig 3.5), stacked under the Stage: a branch off the left trunk leads into
   // each box, and a branch from each box joins the right trunk back up into the Stage. A single Feature has one
-  // box, its one Rework State (Fig 3.12).
+  // box, its one Rework State (Fig 3.12). Three or four Features give 7 or 15 boxes, drawn compact and
+  // labelled by state alone.
   const reworkStates = Object.keys(stage.transitions).filter((s) => s !== "initial");
-  const down = x + 8, up = x + w - 8, bx = x + (w - REWORK.w) / 2;
+  const compact = reworkStates.length > 3;
+  const layout = compact ? REWORK_COMPACT : REWORK;
+  const down = x + 8, up = x + w - 8, bx = x + (w - layout.w) / 2;
   reworkStates.forEach((state, j) => {
-    const by = y + REWORK.dy + j * REWORK.gap;
-    const my = by + REWORK.h / 2;
+    const by = y + layout.dy + j * layout.gap;
+    const my = by + layout.h / 2;
     const count = totalOver(stage, "rework", (s) => s === state);
     const tip = transitionTip(`Rework → ${state}`, stage, (t) => t.rework[state] ?? 0, count);
     arrow(svg, [[down, y + h], [down, my], [bx - 2, my]], "rework", tip);
-    arrow(svg, [[bx + REWORK.w, my], [up, my], [up, y + h + 2]], "processing",
+    arrow(svg, [[bx + layout.w, my], [up, my], [up, y + h + 2]], "processing",
       `Reworked ${state} parts return to Stage ${i + 1}`);
-    box(svg, bx, by, REWORK.w, REWORK.h, COLOUR.rework,
-      [`Rework ${state}`, `R ${fmtProb(stage.transitions.initial.rework[state] ?? 0)}`], tip);
+    box(svg, bx, by, layout.w, layout.h, COLOUR.rework,
+      [compact ? state : `Rework ${state}`, `R ${fmtProb(stage.transitions.initial.rework[state] ?? 0)}`], tip,
+      layout.lineHeight);
   });
-  return y + REWORK.dy + Math.max(reworkStates.length, 1) * REWORK.gap;
+  return y + layout.dy + Math.max(reworkStates.length, 1) * layout.gap;
 }
 
 // Bars share one scale across Stages, so a later Stage's bars shrink with its Reach Probability.
@@ -206,8 +212,13 @@ export function drawDiagram(svg, sequence, results) {
   results.stages.forEach((_, i) => { bottom = Math.max(bottom, drawPassBars(svg, results, i, flowBottom + 20, maxCount)); });
   legend(svg, bottom + 10);
 
-  const width = STAGE.x + (results.stages.length - 1) * COLUMN + SINK.dx + SINK.w + 20;
-  svg.setAttribute("viewBox", `0 0 ${Math.max(width, STAGE.x - 70 + results.stages.length * COLUMN)} ${bottom + 24}`);
+  const width = Math.max(STAGE.x + (results.stages.length - 1) * COLUMN + SINK.dx + SINK.w + 20,
+    STAGE.x - 70 + results.stages.length * COLUMN);
+  svg.setAttribute("viewBox", `0 0 ${width} ${bottom + 24}`);
+  // Never drawn larger than 1:1 (a one-Stage diagram would blow up its text), nor smaller than MIN_SCALE
+  // (four Stages would shrink it): past that the wrapper scrolls.
+  svg.style.maxWidth = `${width}px`;
+  svg.style.minWidth = `${Math.round(width * MIN_SCALE)}px`;
 }
 
 export function attachTooltip(svg, tooltip) {
@@ -218,9 +229,10 @@ export function attachTooltip(svg, tooltip) {
     tooltip.textContent = target.dataset.tip;
     tooltip.hidden = false;
     const r = wrap.getBoundingClientRect();
+    // Positioned in the wrapper's scrolled content, kept within its visible part.
     const left = Math.min(event.clientX - r.left + 12, r.width - tooltip.offsetWidth - 4);
-    tooltip.style.left = `${Math.max(0, left)}px`;
-    tooltip.style.top = `${event.clientY - r.top + 12}px`;
+    tooltip.style.left = `${Math.max(0, left) + wrap.scrollLeft}px`;
+    tooltip.style.top = `${event.clientY - r.top + 12 + wrap.scrollTop}px`;
   });
   svg.addEventListener("mouseleave", () => { tooltip.hidden = true; });
 }

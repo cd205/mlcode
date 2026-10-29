@@ -109,6 +109,59 @@ class TestParallelPresets:
         assert dump_sequence(load_sequence(preset(name))) == preset(name)
 
 
+# Table 3.9's E(PR) and Fig 3.27's Stages, and the I column with Seq 8 corrected to 0.5 + 4 × 0.5 (D10a).
+R8 = {
+    1: (41.7523, [["f1"], ["f2"], ["f3"], ["f4"]], 4.0),
+    2: (41.4665, [["f1", "f2"], ["f3"], ["f4"]], 3.5),
+    3: (41.6588, [["f1"], ["f2", "f3"], ["f4"]], 3.5),
+    4: (41.6501, [["f1"], ["f2"], ["f3", "f4"]], 3.5),
+    5: (41.3642, [["f1", "f2"], ["f3", "f4"]], 3.0),
+    6: (41.4215, [["f1"], ["f2", "f3", "f4"]], 3.0),
+    7: (41.2628, [["f1", "f2", "f3"], ["f4"]], 3.0),
+    8: (40.8657, [["f1", "f2", "f3", "f4"]], 2.5),
+}
+
+
+class TestR8Presets:
+    """R8 (Tables 3.8, 3.9, Fig 3.27): one preset per Inspection placement for f1-f4, at the printed means."""
+
+    @pytest.mark.parametrize("k", list(R8))
+    def test_reproduces_table_3_9(self, k):
+        value, groups, inspection_cost = R8[k]
+        doc = preset(f"r8-seq{k}")
+        assert [[f["name"] for f in s["features"]] for s in doc["stages"]] == groups
+        results = run(doc)
+        reference = results["reference"]
+        assert (reference["source"], reference["quantity"], reference["value"]) == ("Table 3.9", "expected_profit", value)
+        assert reference["within_tolerance"] is True
+        assert results["totals"]["inspection_cost"] == inspection_cost
+
+    @pytest.mark.parametrize("k", (6, 7, 8))
+    def test_stages_of_three_or_four_features_note_the_eq_3_59_gap(self, k):
+        reference = preset(f"r8-seq{k}")["reference"]
+        assert "D1" in reference["note"] and "D10" in reference["note"]
+        assert 5e-5 < reference["tolerance"] <= 5e-4  # printed precision plus the extra expected scrap (ADR 0001)
+
+    @pytest.mark.parametrize("k", list(R8))
+    def test_per_pass_counts_add_up_to_the_parts_entering_each_stage(self, k):
+        results = run(preset(f"r8-seq{k}"), n_parts=10_000)
+        for stage in results["stages"]:
+            entering = 10_000 * stage["reach_probability"]
+            conformed = sum(sum(p["conform"].values()) for p in stage["passes"])
+            scrapped = sum(sum(p["scrap"].values()) for p in stage["passes"])
+            assert conformed + scrapped + stage["remaining"] == pytest.approx(entering, rel=1e-12)
+            assert conformed == pytest.approx(entering * stage["final_conformance"], abs=0.5)
+
+    def test_one_stage_of_four_features_has_15_rework_states(self):
+        (stage,) = run(preset("r8-seq8"))["stages"]
+        assert len(stage["transitions"]) == 16  # the Initial State and 2^4 − 1 Rework States
+        assert "f1+f2+f3+f4" in stage["transitions"]
+
+    @pytest.mark.parametrize("k", list(R8))
+    def test_round_trips(self, k):
+        assert dump_sequence(load_sequence(preset(f"r8-seq{k}"))) == preset(f"r8-seq{k}")
+
+
 def r4_with_costs(costs):
     doc = preset("r4")
     doc["stages"][0]["costs"] = costs
