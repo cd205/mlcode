@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, StrictFloat
 
 from oms.formats import run
+from oms.optimisation.means import Objective
 
 PRESETS = Path(__file__).resolve().parents[2] / "manufacturing_oms" / "presets"
 STATIC = Path(__file__).resolve().parents[1] / "static"
@@ -51,6 +52,12 @@ class EvaluateRequest(BaseModel):
 
     sequence: dict[str, Any]
     n_parts: StrictFloat = 10_000  # strict: ints are fine, but no true -> 1 or "500" -> 500
+
+
+class OptimiseRequest(EvaluateRequest):
+    """Only the objective is chosen; bounds, starts and seed are the engine defaults (C15)."""
+
+    objective: Objective = "expected_profit"
 
 
 def _presets() -> dict[str, Path]:
@@ -89,6 +96,14 @@ def evaluate(request: EvaluateRequest) -> dict[str, Any]:
     try:
         return run(request.sequence, action="evaluate", n_parts=request.n_parts)
     except ValueError as error:  # only the engine's ValueErrors are the user's to fix
+        raise HTTPException(422, str(error)) from error
+
+
+@app.post("/api/optimise")
+def optimise(request: OptimiseRequest) -> dict[str, Any]:
+    try:
+        return run(request.sequence, action="optimise", objective=request.objective, n_parts=request.n_parts)
+    except ValueError as error:
         raise HTTPException(422, str(error)) from error
 
 

@@ -1,9 +1,11 @@
-// The page (web_app_plan.md §7): pick a preset, Evaluate it on the server, draw the diagram and the results table.
+// The page (web_app_plan.md §7): pick a preset, Evaluate it or Optimise its Mean Settings on the server, draw the
+// diagram and the results table.
 
 import { attachTooltip, drawDiagram, fmtProb } from "./diagram.js";
 
 const $ = (id) => document.getElementById(id);
 let sequence = null;
+let undoMeans = null;  // the means before the last Optimise: one undo slot (C16)
 
 // Calls the API; a failed call throws an Error carrying the server's readable message (C18).
 async function api(path, options) {
@@ -36,6 +38,7 @@ function row(table, label, value, cls = "num", sub = false) {
 }
 
 const money = (x) => x.toFixed(2);
+const fmtMean = (x) => String(Number(x.toFixed(4)));  // optimised means are unrounded; round for display only (C12)
 
 function showSequence(seq) {
   const wrap = $("sequence-summary");
@@ -48,8 +51,8 @@ function showSequence(seq) {
     const body = table.createTBody();
     stage.features.forEach((f, j) => {
       const tr = body.insertRow();
-      const mean = seq.means.values[i]?.[f.name];
-      for (const v of [f.name, f.lower, f.upper, f.rework_side, stage.variation.sigmas[j], mean ?? "–"]) {
+      const mu = seq.means.values[i]?.[f.name];
+      for (const v of [f.name, f.lower, f.upper, f.rework_side, stage.variation.sigmas[j], mu === undefined ? "–" : fmtMean(mu)]) {
         tr.insertCell().textContent = v;
       }
     });
@@ -89,7 +92,7 @@ function showResults(results) {
   row(table, "inspection", money(t.inspection_cost), "num", true);
   row(table, "Final Conformance", fmtProb(t.final_conformance));
   results.means.values.forEach((mu, i) => {
-    row(table, `Mean Settings, Stage ${i + 1}`, Object.entries(mu).map(([n, v]) => `${n} = ${v}`).join(", "));
+    row(table, `Mean Settings, Stage ${i + 1}`, Object.entries(mu).map(([n, v]) => `${n} = ${fmtMean(v)}`).join(", "));
   });
 
   const ref = results.reference;
@@ -102,43 +105,77 @@ function showResults(results) {
     row(table, `Engine vs thesis (${ref.source})`, cell);
     if (ref.note) row(table, "Note", ref.note, "");
   }
+  const o = results.optimisation;
+  if (o) {
+    const objective = o.objective === "expected_profit" ? "maximum Expected Profit" : "minimum production cost";
+    row(table, "Optimised for", `${objective} (${money(o.objective_value)})`, "");
+    row(table, "Optimiser", `${o.method}, ${o.n_starts} starts (seed ${o.seed}), ${o.n_evaluations} evaluations, ` +
+      (o.success ? "converged" : "did not converge"), "");
+    row(table, "Bounds", Object.entries(o.bounds).map(([n, [lo, hi]]) => `${n} ∈ [${lo}, ${hi}]`).join(", "), "");
+  }
   table.hidden = false;
+}
+
+function setUndo(means) {
+  undoMeans = means;
+  $("undo").hidden = !means;
 }
 
 async function loadPreset(id) {
   showError(null);
   try {
     sequence = await api(`/api/presets/${encodeURIComponent(id)}`);
+    setUndo(null);
     showSequence(sequence);
   } catch (e) {
     showError(e.message);
   }
 }
 
-async function evaluate() {
-  const evaluated = sequence;  // the preset may change while the request is in flight
-  if (!evaluated) return;
+const BUTTONS = ["evaluate", "optimise", "undo"];
+
+// Evaluate, or Optimise and replace the sequence's means with the optimum (C16).
+async function submit(action) {
+  const submitted = sequence;  // the preset may change while the request is in flight
+  if (!submitted) return;
   showError(null);
-  $("evaluate").disabled = true;
+  for (const id of BUTTONS) $(id).disabled = true;
   try {
-    const nParts = Number($("n-parts").value);
-    const results = await api("/api/evaluate", {
+    const body = { sequence: submitted, n_parts: Number($("n-parts").value) };
+    if (action === "optimise") body.objective = $("objective").value;
+    const results = await api(`/api/${action}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sequence: evaluated, n_parts: nParts }),
+      body: JSON.stringify(body),
     });
-    drawDiagram($("diagram"), evaluated, results);
+    if (sequence !== submitted) return;
+    if (action === "optimise") {
+      setUndo(submitted.means);
+      sequence = { ...submitted, means: results.means };
+      showSequence(sequence);
+    }
+    drawDiagram($("diagram"), sequence, results);
     showResults(results);
   } catch (e) {
     showError(e.message);
   } finally {
-    $("evaluate").disabled = false;
+    for (const id of BUTTONS) $(id).disabled = false;
   }
+}
+
+function undo() {
+  if (!sequence || !undoMeans) return;
+  sequence = { ...sequence, means: undoMeans };
+  setUndo(null);
+  showSequence(sequence);
+  submit("evaluate");  // redraw at the restored means
 }
 
 async function init() {
   attachTooltip($("diagram"), $("tooltip"));
-  $("evaluate").addEventListener("click", evaluate);
+  $("evaluate").addEventListener("click", () => submit("evaluate"));
+  $("optimise").addEventListener("click", () => submit("optimise"));
+  $("undo").addEventListener("click", undo);
   $("preset").addEventListener("change", (e) => {
     const option = e.target.selectedOptions[0];
     $("preset-description").textContent = option?.dataset.description ?? "";

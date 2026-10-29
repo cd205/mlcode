@@ -342,3 +342,54 @@ class TestMalformedInput:
     def test_run_rejects_a_bad_part_count(self, n_parts):
         with pytest.raises(ValueError, match="n_parts: must be a positive finite number"):
             run(preset("r1"), n_parts=n_parts)
+
+
+class TestOptimise:
+    """C15, C16: run(action="optimise") replaces the means with the optimum and reports the optimiser record."""
+
+    @pytest.mark.parametrize(
+        "objective, mu",
+        [
+            ("expected_profit", 10.61),  # Table 3.3
+            ("production_cost", 10.09),  # Table 3.3, minimum PC + Sr + Rw (U2)
+        ],
+    )
+    def test_r2_recovers_the_printed_optimum(self, objective, mu):
+        results = run(preset("r2"), action="optimise", objective=objective)
+        assert results["means"]["values"][0]["x"] == pytest.approx(mu, abs=0.005)
+
+    def test_reports_the_optimiser_record_with_the_engine_defaults(self):
+        record = run(preset("r2"), action="optimise")["optimisation"]
+        assert record["objective"] == "expected_profit"
+        assert record["scheme"] == "per_feature"
+        assert record["method"] == "L-BFGS-B"
+        assert record["bounds"] == {"x": [5.0, 15.0]}  # [L - 3σ, U + 3σ]
+        assert (record["n_starts"], record["seed"]) == (8, 0)
+        assert record["n_evaluations"] > record["n_starts"]
+        assert record["success"] is True
+
+    def test_evaluating_the_optimised_means_gives_the_same_results(self):
+        optimised = run(preset("r5"), action="optimise")
+        doc = preset("r5")
+        doc["means"] = optimised["means"]
+        evaluated = run(doc)
+        assert evaluated["totals"] == optimised["totals"]
+        assert evaluated["stages"] == optimised["stages"]
+        assert optimised["totals"]["expected_profit"] >= run(preset("r5"))["totals"]["expected_profit"]
+        assert optimised["optimisation"]["objective_value"] == optimised["totals"]["expected_profit"]
+
+    def test_minimising_production_cost_reports_it_as_the_objective_value(self):
+        results = run(preset("r2"), action="optimise", objective="production_cost")
+        assert results["optimisation"]["objective_value"] == results["totals"]["production_cost"]
+
+    def test_unknown_objective_is_rejected(self):
+        with pytest.raises(ValueError, match=r"^objective: must be 'expected_profit' or 'production_cost'"):
+            run(preset("r2"), action="optimise", objective="profit")
+
+    def test_unknown_action_is_rejected(self):
+        with pytest.raises(ValueError, match=r"^action: "):
+            run(preset("r2"), action="search")
+
+    def test_omits_the_reference_check_which_is_for_the_given_means(self):
+        assert "reference" in run(preset("r2"))
+        assert "reference" not in run(preset("r2"), action="optimise", objective="production_cost")

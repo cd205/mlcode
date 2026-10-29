@@ -1,10 +1,11 @@
-"""run(): evaluate sequence JSON and report results JSON (web_app_plan.md §5)."""
+"""run(): evaluate sequence JSON, or optimise its Mean Settings, and report results JSON (web_app_plan.md §5)."""
 
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 import math
-from typing import Literal
+from typing import Literal, get_args
 
 from oms.economics.sequence import ProfitBreakdown, evaluate_sequence
 from oms.economics.stage import StageResult
@@ -12,24 +13,39 @@ from oms.formats.sequence_format import (
     Json, LoadedSequence, Reference, dump_means, dump_reference, load_sequence, state_key,
 )
 from oms.markov.states import INITIAL_STATE, State
+from oms.optimisation.means import Objective, OptimisationResult, optimise_means
 
-Action = Literal["evaluate"]
+Action = Literal["evaluate", "optimise"]
+OBJECTIVES: tuple[Objective, ...] = get_args(Objective)
 
 STOP_BELOW_PARTS = 0.5  # stop the Passes once fewer expected parts than this are left in Rework States
 MAX_PASSES = 20
 
 
-def run(sequence_json: object, action: Action = "evaluate", *, n_parts: float = 10_000) -> Json:
-    """Evaluate a sequence at its Mean Settings and report it for `n_parts` parts started.
+def run(sequence_json: object, action: Action = "evaluate", *, objective: Objective = "expected_profit",
+        n_parts: float = 10_000) -> Json:
+    """Evaluate a sequence at its Mean Settings, or optimise them first, and report it for `n_parts` parts started.
 
-    Counts are expected counts, N times a probability, left unrounded (C12).
+    *Optimise* uses the engine defaults for bounds, starts and seed (C15); its Mean Settings replace the
+    sequence's in the results, and the optimiser record is reported with them in place of the reference
+    check, which is for the given means. `objective` applies only to *Optimise*. Counts are expected counts, N times a probability, left unrounded (C12).
     """
-    if action != "evaluate":
-        raise ValueError(f"action: only 'evaluate' is supported, got {action!r}")
+    if action not in get_args(Action):
+        raise ValueError(f"action: must be 'evaluate' or 'optimise', got {action!r}")
     if isinstance(n_parts, bool) or not isinstance(n_parts, (int, float)) or not (0 < n_parts < math.inf):
         raise ValueError(f"n_parts: must be a positive finite number, got {n_parts!r}")
     loaded = load_sequence(sequence_json)
-    breakdown = evaluate_sequence(loaded.sequence, loaded.means)
+    optimisation = None
+    if action == "optimise":
+        if objective not in OBJECTIVES:
+            raise ValueError(f"objective: must be 'expected_profit' or 'production_cost', got {objective!r}")
+        # The loader accepts only per_feature means so far, so the Initial State's means are the per-Feature
+        # values; the other schemes (C10) will need the loaded scheme here.
+        optimisation = optimise_means(loaded.sequence, "per_feature", objective=objective)
+        loaded = replace(loaded, feature_means=tuple(dict(m.by_state[INITIAL_STATE]) for m in optimisation.means))
+        breakdown = optimisation.breakdown
+    else:
+        breakdown = evaluate_sequence(loaded.sequence, loaded.means)
     results: Json = {
         "action": action,
         "n_parts": n_parts,
@@ -37,9 +53,27 @@ def run(sequence_json: object, action: Action = "evaluate", *, n_parts: float = 
         "totals": _totals(breakdown),
         "stages": [_stage(loaded, i, breakdown, n_parts) for i in range(len(breakdown.stages))],
     }
-    if loaded.reference is not None:
+    if optimisation is not None:
+        results["optimisation"] = _optimisation(optimisation)
+    elif loaded.reference is not None:
         results["reference"] = _reference_check(loaded.reference, breakdown)
     return results
+
+
+def _optimisation(o: OptimisationResult) -> Json:
+    """The optimiser record (C15): enough to reproduce the search."""
+    return {
+        "objective": o.objective,
+        "objective_value": o.objective_value,
+        "scheme": o.scheme,
+        "method": o.method,
+        "bounds": {name: list(bound) for name, bound in o.bounds.items()},
+        "n_starts": o.n_starts,
+        "seed": o.seed,
+        "tol": o.tol,
+        "n_evaluations": o.n_evaluations,
+        "success": o.success,
+    }
 
 
 def _totals(b: ProfitBreakdown) -> Json:

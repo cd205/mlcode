@@ -39,6 +39,8 @@ label { display: block; margin-bottom: 12px; font-weight: 600; }
 select, input { display: block; width: 100%; margin-top: 4px; padding: 6px; font: inherit; }
 button { font: inherit; padding: 8px 20px; border: 0; border-radius: 6px; background: var(--ink); color: #fff; cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: wait; }
+button.secondary { background: var(--bg); color: var(--ink); border: 1px solid var(--ink); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--grid); }

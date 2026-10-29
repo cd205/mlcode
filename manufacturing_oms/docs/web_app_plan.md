@@ -116,7 +116,8 @@ R5 (two Serial Stages) is the same shape with two entries in `stages`, one Featu
   rework and Inspection Costs, production cost;
 - for each Stage: Reach Probability, `final_conformance`, `scrap_probability`, `visits` by state, the
   transition probabilities from each state, and the **per-Pass counts** below;
-- the reference check when the sequence has a `reference` (C14).
+- the reference check when the sequence has a `reference` (C14), for *Evaluate* only: the reference is for the
+  given means, not the optimised ones.
 
 **Per-Pass counts** (what the thesis bars show; expected counts, C12). For Stage i, start with
 v₁ = {initial: N · rᵢ} parts, where rᵢ is the Reach Probability. For Pass k = 1, 2, …:

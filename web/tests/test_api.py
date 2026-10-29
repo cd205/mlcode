@@ -57,6 +57,36 @@ def test_evaluate_presets_match_their_references(preset_id, n_stages):
         assert closed + stage["remaining"] == pytest.approx(10_000 * stage["reach_probability"], rel=1e-12)
 
 
+@pytest.mark.parametrize("objective, mu", [("expected_profit", 10.61), ("production_cost", 10.09)])
+def test_optimise_r2_returns_the_printed_optimum_and_the_optimiser_record(objective, mu):
+    sequence = client.get("/api/presets/r2").json()
+    response = client.post("/api/optimise", json={"sequence": sequence, "objective": objective})
+    assert response.status_code == 200
+    results = response.json()
+    assert results["action"] == "optimise"
+    assert results["means"]["values"][0]["x"] == pytest.approx(mu, abs=0.005)
+    record = results["optimisation"]
+    assert record["objective"] == objective
+    assert record["bounds"] == {"x": [5.0, 15.0]}
+    assert {"method", "n_starts", "seed", "n_evaluations", "success"} <= set(record)
+
+
+def test_optimised_means_can_be_evaluated_and_undone():
+    sequence = client.get("/api/presets/r2").json()
+    before = client.post("/api/evaluate", json={"sequence": sequence}).json()
+    optimised = client.post("/api/optimise", json={"sequence": sequence}).json()
+    previous, sequence["means"] = sequence["means"], optimised["means"]  # C16: replace, keeping one undo slot
+    replaced = client.post("/api/evaluate", json={"sequence": sequence}).json()
+    assert replaced["totals"] == optimised["totals"]
+    sequence["means"] = previous
+    assert client.post("/api/evaluate", json={"sequence": sequence}).json() == before
+
+
+def test_optimise_with_an_unknown_objective_is_422():
+    response = client.post("/api/optimise", json={"sequence": r1(), "objective": "profit"})
+    assert_readable_error(response, 422, "objective")
+
+
 def test_presets_lists_the_serial_and_parallel_presets():
     ids = {p["id"] for p in client.get("/api/presets").json()}
     assert {"r1", "r2", "r3", "r4", "r5"} <= ids
