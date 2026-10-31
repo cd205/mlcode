@@ -5,9 +5,12 @@ the page; the `oms` engine runs only here, never in the browser (ADR 0005).
 
 ```
 uv run uvicorn app.main:app      # then open http://127.0.0.1:8000
-uv run pytest
+uv run pytest                    # the builder tests need node on PATH (skipped without it)
 uv run mypy
 ```
+
+The builder's edits live in `static/builder.js` (no DOM), so `tests/builder.test.mjs` runs them under
+`node --test`, and `tests/test_builder.py` checks the sequences they make against the API.
 
 | Method | Path | Does |
 |---|---|---|

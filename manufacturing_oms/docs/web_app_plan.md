@@ -166,6 +166,13 @@ outgrows it):
   processing. Hover shows counts and probabilities. More than 3 Rework States (up to 15 for 4 Features) are
   drawn as compact boxes; the diagram is never scaled above 1:1 or below 0.75, and scrolls sideways past that.
 - The edited sequence can be downloaded and uploaded as JSON.
+- Builder rules (#31): an edit drops the preset's `reference` (it is no longer the thesis case) and empties the
+  undo slot; *Optimise* and *Undo* keep it. A Feature moved past the end of its Stage goes into the neighbouring
+  Stage. Changing Features keeps the cost tables in step: a new Feature costs 0 (C17), and a new Rework State in a
+  full table costs the sum of its Features' Rework Costs, with the Initial State's Scrap Cost. A full table can
+  switch to the per-Feature shortcut only when it is additive. While a Stage's variation or the means scheme is
+  preset-only, its Features can't be added, removed or moved, nor (for a scheme) their Rework Sides
+  changed; a Stage with preset-only variation can still be moved or deleted. Switching a scheme to `per_feature` is left to #28.
 
 ## 8. Staged plan
 

@@ -13,6 +13,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -27,7 +28,7 @@ h1 { margin: 0 0 4px; font-size: 1.4rem; }
 
 main {
   display: grid;
-  grid-template-columns: minmax(240px, 320px) 1fr;
+  grid-template-columns: minmax(360px, 520px) 1fr;
   gap: 16px;
   margin-top: 16px;
 }
@@ -46,8 +47,34 @@ table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nu
 th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
 td.num { text-align: right; }
 th.sub { padding-left: 24px; font-weight: 400; color: var(--muted); }
-#sequence-summary table { margin-bottom: 12px; font-size: 0.9rem; background: var(--bg); }
-#sequence-summary h3 { margin: 8px 0 4px; font-size: 0.95rem; }
+.file-actions { margin-bottom: 12px; }
+button.secondary { padding: 4px 12px; }
+button.icon { padding: 2px 7px; background: var(--bg); color: var(--ink); border: 1px solid var(--grid); }
+button.icon:disabled, button.secondary:disabled { cursor: default; opacity: 0.35; }
+
+/* The editor: compact inputs in tables, one card per Stage. */
+.stage { background: var(--bg); border: 1px solid var(--grid); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; }
+.stage-head { display: flex; align-items: center; gap: 4px; }
+.stage-head h3 { margin: 0 auto 0 0; font-size: 0.95rem; }
+.stage .actions { margin: 6px 0 10px; }
+.scroll { overflow-x: auto; }
+.stage table { font-size: 0.85rem; }
+.stage th, .stage td { padding: 3px 4px; }
+.stage td input, .stage td select { margin: 0; padding: 3px 4px; }
+.features th, .features td { padding: 3px 2px; }
+.features td input { width: 46px; }
+.features td input.name { width: 56px; }
+.features td input.mean { width: 74px; }
+.features td select { width: 66px; }
+.features button.icon { padding: 1px 5px; }
+#sequence-editor > .actions { margin-bottom: 16px; }
+.row-actions { display: flex; gap: 2px; }
+input.auto { font-style: italic; color: var(--muted); }
+label.inline { display: flex; align-items: center; gap: 8px; font-weight: 400; margin-bottom: 6px; }
+label.inline input, label.inline select { width: auto; flex: 1; margin: 0; }
+.costs { border-top: 1px solid var(--grid); margin-top: 8px; padding-top: 8px; }
+.costs .muted { font-size: 0.85rem; margin: 4px 0; }
+#outputs.stale #diagram, #outputs.stale #results { opacity: 0.45; }
 
 #error { background: var(--error-bg); border: 1px solid var(--scrap); border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
 
