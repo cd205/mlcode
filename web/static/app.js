@@ -2,6 +2,7 @@
 // on the server, draw the diagram and the results table.
 
 import { Builder, OPERATION_NAMES, REWORK_SIDES } from "./builder.js";
+import { drawChain } from "./chain.js";
 import { attachTooltip, drawDiagram, fmtProb } from "./diagram.js";
 
 const $ = (id) => document.getElementById(id);
@@ -97,6 +98,17 @@ function edit(change, redraw) {
 function refresh() {
   for (const update of bindings) update();
   updateActions();
+  drawChain($("chain"), builder.rows, { problems: builder.problems, selected, keyOf: rowKey, onSelect: selectRow });
+}
+
+// A row's key in `selected`.
+const rowKey = (r) => (r.kind === "operation" ? `op:${r.name}` : `insp:${r.stage}`);
+
+// Clicking the chain opens that row's editor in the list (C26).
+function selectRow(key) {
+  selected = key;
+  renderEditor();
+  document.querySelector("#sequence-editor .row.open")?.scrollIntoView({ block: "nearest" });
 }
 
 // Evaluate, Optimise and Download need a valid Sequence list (C21).
@@ -166,7 +178,7 @@ function operationRow(r) {
     const mu = b.document.means.values[i]?.[f.name];
     return `${f.name} · ${f.lower}–${f.upper} · μ ${typeof mu === "number" ? fmtMean(mu) : "–"}`;
   });
-  return listRow(`op:${name}`, "operation", summary, [
+  return listRow(rowKey(r), "operation", summary, [
     iconButton("↑", `Move ${name} up`, () => b.moveOperation(i, j, -1), !r.canMoveUp),
     iconButton("↓", `Move ${name} down`, () => b.moveOperation(i, j, +1), !r.canMoveDown),
     iconButton("✕", `Delete ${name}`, () => b.deleteOperation(i, j), !structure),
@@ -220,8 +232,7 @@ function operationEditor(i, j, name) {
 function inspectionRow(r) {
   const b = builder;
   const i = r.stage;
-  const key = `insp:${i}`;
-  return listRow(key, "inspection", r.label, [
+  return listRow(rowKey(r), "inspection", r.label, [
     iconButton("↑", `Move Stage ${i + 1}'s Inspection up`, () => b.moveInspection(i, -1), !r.canMoveUp),
     iconButton("↓", `Move Stage ${i + 1}'s Inspection down`, () => b.moveInspection(i, +1), !r.canMoveDown),
     iconButton("✕", `Delete Stage ${i + 1}'s Inspection`, () => {

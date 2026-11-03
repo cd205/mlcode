@@ -511,3 +511,13 @@ test("a Stage removed with its last unclosed Operation leaves no check marker fo
   b.addInspection();
   assert.equal(b.scrapNeedsCheck(1), false);
 });
+
+test("rows say how the sequence chain draws them: each Stage's shape and which Operations are unclosed", () => {
+  const b = r4();
+  b.addInspection();
+  b.addOperation("drill");
+  assert.deepEqual(b.rows.map((r) => (r.kind === "operation" ? `${r.name} ${r.closed}` : `${r.stage} ${r.shape}`)),
+    ["a true", "b true", "0 Parallel", "1 no Operations", "drill false"]);
+  b.addInspection();
+  assert.deepEqual(b.rows.filter((r) => r.kind === "inspection").map((r) => r.shape), ["Parallel", "no Operations", "Serial"]);
+});

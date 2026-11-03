@@ -22,14 +22,14 @@ const passLabel = (k) => ROMAN[k] ?? String(k + 1);
 const fmtCount = (n) => Math.round(n).toLocaleString("en-GB");
 export const fmtProb = (p) => p.toFixed(5);
 
-function el(name, attrs = {}, parent = null) {
+export function el(name, attrs = {}, parent = null) {
   const node = document.createElementNS(NS, name);
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
   if (parent) parent.appendChild(node);
   return node;
 }
 
-function text(parent, x, y, content, attrs = {}) {
+export function text(parent, x, y, content, attrs = {}) {
   const node = el("text", { x, y, ...attrs }, parent);
   node.textContent = content;
   return node;

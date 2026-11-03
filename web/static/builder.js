@@ -81,13 +81,14 @@ export class Builder {
 
   // The Sequence list (C19): each Stage's Operations, then the Inspection that closes it. A row can move up or down
   // past any neighbouring row bar an Inspection next to an Inspection, unless a Stage it changes is locked (§7.1).
+  // `closed` (false after the last Inspection) and `shape` (Serial, Parallel or no Operations) are for the sequence chain (C26).
   get rows() {
     const { stages, means } = this.#doc;
     return stages.flatMap((stage, i) => {
       const n = stage.features.length;
       const closed = !this.#isOpen(i);
       const operations = stage.features.map((f, j) => ({
-        kind: "operation", stage: i, index: j, name: f.name, lower: f.lower, upper: f.upper,
+        kind: "operation", stage: i, index: j, name: f.name, lower: f.lower, upper: f.upper, closed,
         mean: means.values[i]?.[f.name],
         canMoveUp: j > 0 ? this.#structureEditable(i) : this.#canMoveAcross(i, i - 1),
         canMoveDown: j < n - 1 ? this.#structureEditable(i) : closed && this.#canMoveAcross(i, i + 1),
@@ -95,7 +96,7 @@ export class Builder {
       if (!closed) return operations;
       const shape = n === 0 ? "no Operations" : n === 1 ? "Serial" : "Parallel";
       return [...operations, {
-        kind: "inspection", stage: i, label: `Inspection · Stage ${i + 1} · ${shape}`,
+        kind: "inspection", stage: i, shape, label: `Inspection · Stage ${i + 1} · ${shape}`,
         canMoveUp: n > 0 && this.#canMoveAcross(i, i + 1),
         canMoveDown: stages[i + 1]?.features.length > 0 && this.#canMoveAcross(i + 1, i),
         canDelete: this.#canMoveAcross(i, i + 1),
