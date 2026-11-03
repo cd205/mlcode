@@ -135,6 +135,42 @@ def test_editing_a_parallel_stage_keeps_its_full_cost_table_in_step():
     evaluate(sequence)
 
 
+STAGE_MOVES = {
+    # r4 then two Operations in a second Stage: a b | drill drill2 |
+    "Operation down into the next Stage": ("b.moveOperation(0, 1, +1);", [["a"], ["b", "drill", "drill2"]]),
+    "Operation up into a full table": ("b.moveOperation(1, 0, -1);", [["a", "b", "drill"], ["drill2"]]),
+    "Inspection up": ("b.moveInspection(0, -1);", [["a"], ["b", "drill", "drill2"]]),
+    "Inspection down": ("b.moveInspection(0, +1);", [["a", "b", "drill"], ["drill2"]]),
+    "Inspection deleted": ("b.deleteInspection(0);", [["a", "b", "drill", "drill2"]]),
+    "out and back": ("b.moveOperation(1, 1, +1); b.moveInspection(1, +1);", [["a", "b"], ["drill", "drill2"]]),
+}
+
+
+@pytest.mark.parametrize("case", STAGE_MOVES.values(), ids=STAGE_MOVES.keys())
+def test_moves_that_change_stages_give_a_sequence_the_api_accepts(case):
+    script, names = case
+    sequence = build(f'b.addOperation("drill"); b.addOperation("drill"); b.addInspection(); {script}', preset("r4"))
+    assert [[f["name"] for f in s["features"]] for s in sequence["stages"]] == names
+    assert "reference" not in sequence
+    assert [s["costs"]["processing"] for s in sequence["stages"]] == \
+        [sum(f["processing"] for f in s["features"]) for s in sequence["stages"]]
+    results = evaluate(sequence)
+    assert [list(mu) for mu in results["means"]["values"]] == names
+
+
+def test_a_merge_refused_as_too_big_leaves_the_sequence_as_it_was():
+    script = """
+        for (const name of ["turn", "drill", "mill"]) b.addOperation(name);
+        b.addInspection();
+        let message = null;
+        try { b.deleteInspection(0); } catch (e) { message = e.message; }
+    """
+    done = build(script, preset("r4"), result="{ message, sequence: b.sequence }")
+    assert done["message"] == "Stage 1 would have 5 Operations; a Stage can have at most 4."
+    assert [len(s["features"]) for s in done["sequence"]["stages"]] == [2, 3]
+    evaluate(done["sequence"])
+
+
 def test_download_then_upload_gives_the_same_sequence():
     original = build("b.addOperation(); b.addInspection(); b.moveOperation(1, 1, -1);", preset("r8-seq3"))
     uploaded = build("b = Builder.upload(b.download());", original)

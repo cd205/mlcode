@@ -79,19 +79,27 @@ export class Builder {
 
   get revision() { return this.#revision; }
 
-  // The Sequence list (C19): each Stage's Operations, then the Inspection that closes it. An Operation can move up
-  // or down only within its Stage.
+  // The Sequence list (C19): each Stage's Operations, then the Inspection that closes it. A row can move up or down
+  // past any neighbouring row bar an Inspection next to an Inspection, unless a Stage it changes is locked (§7.1).
   get rows() {
     const { stages, means } = this.#doc;
     return stages.flatMap((stage, i) => {
       const n = stage.features.length;
+      const closed = !this.#isOpen(i);
       const operations = stage.features.map((f, j) => ({
         kind: "operation", stage: i, index: j, name: f.name, lower: f.lower, upper: f.upper,
-        mean: means.values[i]?.[f.name], canMoveUp: j > 0, canMoveDown: j < n - 1,
+        mean: means.values[i]?.[f.name],
+        canMoveUp: j > 0 ? this.#structureEditable(i) : this.#canMoveAcross(i, i - 1),
+        canMoveDown: j < n - 1 ? this.#structureEditable(i) : closed && this.#canMoveAcross(i, i + 1),
       }));
-      if (this.#isOpen(i)) return operations;
+      if (!closed) return operations;
       const shape = n === 0 ? "no Operations" : n === 1 ? "Serial" : "Parallel";
-      return [...operations, { kind: "inspection", stage: i, label: `Inspection · Stage ${i + 1} · ${shape}` }];
+      return [...operations, {
+        kind: "inspection", stage: i, label: `Inspection · Stage ${i + 1} · ${shape}`,
+        canMoveUp: n > 0 && this.#canMoveAcross(i, i + 1),
+        canMoveDown: stages[i + 1]?.features.length > 0 && this.#canMoveAcross(i + 1, i),
+        canDelete: this.#canMoveAcross(i, i + 1),
+      }];
     });
   }
 
@@ -278,20 +286,14 @@ export class Builder {
     const closesOpen = this.#isOpen(i) && this.#doc.stages[i].features.length === 1;
     this.#edit((seq) => {
       this.#takeFeature(seq, i, j);
-      if (closesOpen) {
-        seq.stages.pop();
-        seq.means.values.pop();
-        this.#checkScrap.delete(i);  // not to be inherited by the next Stage added
-      }
+      if (closesOpen) this.#dropLastStage(seq);
     }, this.#open && !closesOpen);
   }
 
-  // Up (-1) or down (+1) within the Stage.
+  // Up (-1) or down (+1); past an Inspection, into the neighbouring Stage.
   moveOperation(i, j, delta) {
     const target = j + delta;
-    if (target < 0 || target >= this.#doc.stages[i].features.length) {
-      throw new Error("An Operation can't be moved past an Inspection.");
-    }
+    if (target < 0 || target >= this.#doc.stages[i].features.length) return this.#moveAcross(i, j, i + delta);
     this.#requireStructure(i);
     this.#edit((seq) => {
       const stage = seq.stages[i];
@@ -301,7 +303,100 @@ export class Builder {
     });
   }
 
+  // Up (-1) or down (+1) past the neighbouring Operation, which so changes Stage (§7.1).
+  moveInspection(i, delta) {
+    this.#requireInspection(i);
+    const { stages } = this.#doc;
+    if (delta < 0) {
+      const n = stages[i].features.length;
+      if (!n) throw new Error(`Stage ${i + 1} has no Operations for its Inspection to move past.`);
+      return this.#moveAcross(i, n - 1, i + 1);
+    }
+    if (!stages[i + 1]?.features.length) throw new Error("There is nothing after this Inspection to move past.");
+    return this.#moveAcross(i + 1, 0, i);
+  }
+
+  // Merges Stage i's Operations into the start of the next Stage, which keeps its own costs, Process Variation and
+  // Inspection Cost; Stage i's go (§7.1). The last Inspection's Operations are left unclosed, with their Stage's
+  // costs kept for when it is closed again. Refused if the merged Stage would be too big.
+  deleteInspection(i) {
+    this.#requireInspection(i);
+    const { stages } = this.#doc;
+    const last = i === stages.length - 1;
+    this.#requireStructure(i);
+    if (!last) this.#requireStructure(i + 1);
+    const merged = stages[i].features.length + (last ? 0 : stages[i + 1].features.length);
+    if (merged > MAX_OPERATIONS) {
+      throw new Error(`Stage ${i + 1} would have ${merged} Operations; a Stage can have at most ${MAX_OPERATIONS}.`);
+    }
+    if (last) {
+      if (merged) return this.#edit(() => {}, true);  // nothing changes but that the list is open again
+      return this.#edit((seq) => this.#dropLastStage(seq), false);
+    }
+    this.#edit((seq) => {
+      const [from] = seq.stages.splice(i, 1);
+      const [means] = seq.means.values.splice(i, 1);
+      const to = seq.stages[i];
+      to.features.unshift(...from.features);
+      to.variation.sigmas.unshift(...from.variation.sigmas);
+      seq.means.values[i] = { ...means, ...seq.means.values[i] };
+      orderMeans(seq, i);
+      syncCosts(to);
+      syncProcessing(to);
+      this.#splitStages = withoutStage(this.#splitStages, i);
+      this.#splitStages.delete(i);  // the merged Stage's total is no longer the preset's
+      this.#checkScrap = withoutStage(this.#checkScrap, i);
+    }, this.#open, (k) => (k < i ? k : k + 1));
+  }
+
   #isOpen(i) { return this.#open && i === this.#doc.stages.length - 1; }
+
+  #requireInspection(i) {
+    if (!this.#doc.stages[i] || this.#isOpen(i)) throw new Error(`Stage ${i + 1} has no Inspection.`);
+  }
+
+  // Moves Feature j of Stage s past the Inspection between it and Stage t = s ± 1, to the start of t going down or
+  // the end of t going up. Its cost entries leave s and t's tables take it in, as for a new Feature (§7); its
+  // Processing Cost and Mean Setting go with it. Past the last Inspection it becomes unclosed; moving up the only
+  // unclosed Operation closes the list again.
+  #moveAcross(s, j, t) {
+    const { stages } = this.#doc;
+    if (t < 0) throw new Error("The first Operation can't move up.");
+    if (t > s && this.#isOpen(s)) throw new Error("The last Operation can't move down.");
+    this.#requireStructure(s);
+    if (t < stages.length) this.#requireStructure(t);
+    const opening = t === stages.length;
+    const closing = this.#isOpen(s) && stages[s].features.length === 1;
+    this.#edit((seq) => {
+      if (opening) this.#pushStage(seq);
+      const from = seq.stages[s];
+      const to = seq.stages[t];
+      const [feature] = from.features.splice(j, 1);
+      const [sigma] = from.variation.sigmas.splice(j, 1);
+      const at = t > s ? 0 : to.features.length;
+      to.features.splice(at, 0, feature);
+      to.variation.sigmas.splice(at, 0, sigma);
+      seq.means.values[t][feature.name] = seq.means.values[s][feature.name];
+      delete seq.means.values[s][feature.name];
+      orderMeans(seq, t);
+      for (const stage of [from, to]) {
+        syncCosts(stage);
+        syncProcessing(stage);
+      }
+      this.#splitStages.delete(s);
+      this.#splitStages.delete(t);
+      if (closing) this.#dropLastStage(seq);
+    }, opening || (this.#open && !closing));
+  }
+
+  // Removes the last Stage, unclosed or empty, leaving it nothing to be inherited by the next Stage added.
+  #dropLastStage(seq) {
+    const i = seq.stages.length - 1;
+    seq.stages.pop();
+    seq.means.values.pop();
+    this.#checkScrap.delete(i);
+    this.#splitStages.delete(i);
+  }
 
   #pushStage(seq) {
     seq.stages.push({
@@ -365,20 +460,29 @@ export class Builder {
     }
   }
 
+  #structureEditable(i) { return this.meansEditable && this.variationEditable(i); }
+
+  // Whether an Operation can go from Stage s into Stage t, which may be new, past the end of the list.
+  #canMoveAcross(s, t) {
+    return t >= 0 && this.#structureEditable(s) && (t >= this.#doc.stages.length || this.variationEditable(t));
+  }
+
   #requireVariation(i) {
     if (!this.variationEditable(i)) throw new Error(`Stage ${i + 1}'s Process Variation is read-only here.`);
   }
 
-  // Applies `change` to a copy, which becomes the list, with `open` saying whether its last Stage is now open. An
-  // edited preset is no longer the thesis case, so its reference goes. A Stage whose earlier Stages' Processing
-  // Costs now total differently has its Scrap Costs flagged for checking (C25).
-  #edit(change, open = this.#open) {
+  // Applies `change` to a copy, which becomes the list, with `open` saying whether its last Stage is now open and
+  // `oldIndex` giving each Stage's index before the change. An edited preset is no longer the thesis case, so its
+  // reference goes. A Stage whose earlier Stages' Processing Costs now total differently has its Scrap Costs flagged
+  // for checking (C25).
+  #edit(change, open = this.#open, oldIndex = (i) => i) {
     const seq = structuredClone(this.#doc);
     const before = earlierProcessingTotals(this.#doc);
     change(seq);
     delete seq.reference;
     earlierProcessingTotals(seq).forEach((total, i) => {
-      if (i < before.length && total !== before[i]) this.#checkScrap.add(i);
+      const k = oldIndex(i);
+      if (k < before.length && !close(total, before[k])) this.#checkScrap.add(i);
     });
     this.#doc = seq;
     this.#open = open;
@@ -402,6 +506,9 @@ function earlierProcessingTotals(seq) {
     return earlier;
   });
 }
+
+// A set of Stage indices once Stage i is gone: i's dropped, the later ones each one less.
+const withoutStage = (indices, i) => new Set([...indices].filter((k) => k !== i).map((k) => (k > i ? k - 1 : k)));
 
 // The Stage's Processing Cost is the sum of its Operations' (C22).
 function syncProcessing(stage) {
@@ -451,10 +558,12 @@ function orderMeans(seq, i) {
   seq.means.values[i] = Object.fromEntries(seq.stages[i].features.map((f) => [f.name, mu[f.name]]));
 }
 
+// Equal bar rounding, as costs summed in a different order are.
+const close = (a, b) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+
 // True when every Rework State costs the sum of its Features' rework and every state has the same Scrap Cost,
 // which is what CostTable.additive builds.
 function isAdditive(costs) {
-  const close = (a, b) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
   const rework = Object.entries(costs.rework).every(([key, v]) =>
     close(v, key.split("+").reduce((sum, name) => sum + (costs.rework[name] ?? NaN), 0)));
   const scraps = Object.values(costs.scrap);

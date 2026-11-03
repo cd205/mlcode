@@ -167,8 +167,8 @@ function operationRow(r) {
     return `${f.name} · ${f.lower}–${f.upper} · μ ${typeof mu === "number" ? fmtMean(mu) : "–"}`;
   });
   return listRow(`op:${name}`, "operation", summary, [
-    iconButton("↑", `Move ${name} up`, () => b.moveOperation(i, j, -1), !structure || !r.canMoveUp),
-    iconButton("↓", `Move ${name} down`, () => b.moveOperation(i, j, +1), !structure || !r.canMoveDown),
+    iconButton("↑", `Move ${name} up`, () => b.moveOperation(i, j, -1), !r.canMoveUp),
+    iconButton("↓", `Move ${name} down`, () => b.moveOperation(i, j, +1), !r.canMoveDown),
     iconButton("✕", `Delete ${name}`, () => b.deleteOperation(i, j), !structure),
   ], () => operationEditor(i, j, name));
 }
@@ -216,8 +216,22 @@ function operationEditor(i, j, name) {
   return box;
 }
 
+// Moving an Inspection regroups the Operations around it; deleting it merges its Stage into the next (§7.1).
 function inspectionRow(r) {
-  return listRow(`insp:${r.stage}`, "inspection", r.label, [], () => inspectionEditor(r.stage));
+  const b = builder;
+  const i = r.stage;
+  const key = `insp:${i}`;
+  return listRow(key, "inspection", r.label, [
+    iconButton("↑", `Move Stage ${i + 1}'s Inspection up`, () => b.moveInspection(i, -1), !r.canMoveUp),
+    iconButton("↓", `Move Stage ${i + 1}'s Inspection down`, () => b.moveInspection(i, +1), !r.canMoveDown),
+    iconButton("✕", `Delete Stage ${i + 1}'s Inspection`, () => {
+      b.deleteInspection(i);
+      // Later Inspections are now a Stage earlier, so an open editor follows its own.
+      const open = selected?.startsWith("insp:") ? Number(selected.slice(5)) : -1;
+      if (open === i) selected = null;
+      else if (open > i) selected = `insp:${open - 1}`;
+    }, !r.canDelete),
+  ], () => inspectionEditor(i));
 }
 
 function inspectionEditor(i) {

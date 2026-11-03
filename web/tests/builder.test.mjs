@@ -113,12 +113,12 @@ test("a table that is not additive can only be edited in full", () => {
   assert.throws(() => b.setCostMode(0, "shortcut"), /not additive/);
 });
 
-test("an Operation moves up or down within its Stage, with its sigma, but not past an Inspection", () => {
+test("an Operation moves up or down within its Stage, with its sigma, but not past the ends of the list", () => {
   const b = r4();
   b.setSigma(0, 1, 0.5);
   b.addOperation();
   assert.deepEqual(b.rows.map((r) => [r.canMoveUp, r.canMoveDown]),
-    [[false, true], [true, false], [undefined, undefined], [false, false]]);
+    [[false, true], [true, true], [true, true], [true, false]]);
   b.moveOperation(0, 1, -1);
   const [stage] = b.sequence?.stages ?? [];
   assert.equal(stage, undefined);  // f1 is still after the last Inspection
@@ -128,8 +128,9 @@ test("an Operation moves up or down within its Stage, with its sigma, but not pa
   assert.deepEqual(moved.variation.sigmas, [0.5, 1]);
   assert.deepEqual(moved.costs.rework, { b: 12, a: 15, "b+a": 27 });
   assert.deepEqual(b.sequence.means.values[0], { b: 15.59, a: 10.537 });
-  assert.throws(() => b.moveOperation(0, 1, +1), /past an Inspection/);
-  assert.throws(() => b.moveOperation(1, 0, -1), /past an Inspection/);
+  assert.throws(() => b.moveOperation(0, 0, -1), /first Operation can't move up/);
+  b.addOperation();
+  assert.throws(() => b.moveOperation(2, 0, +1), /last Operation can't move down/);
 });
 
 test("deleting an Operation removes its costs and mean; deleting a Stage's last one leaves its Inspection", () => {
@@ -313,6 +314,191 @@ test("a change to earlier Stages' Processing Costs flags a Stage's Scrap Costs f
   deleted.addInspection();
   deleted.deleteOperation(0, 0);
   assert.deepEqual([1, 2].map((i) => deleted.scrapNeedsCheck(i)), [true, true]);
+});
+
+// R4's Parallel Stage (full table) then a Serial Stage c (shortcut).
+const twoStages = () => new Builder({ ...r4().sequence, stages: [r4().sequence.stages[0], serialStage("c")],
+                                      means: { scheme: "per_feature", values: [{ a: 10.537, b: 15.59 }, { c: 10 }] } });
+
+test("an Operation moved down past an Inspection starts the next Stage, its costs leaving the old one", () => {
+  const b = twoStages();
+  b.moveOperation(0, 1, +1);  // b
+  assert.deepEqual(b.rows.map(describe), [
+    "a 8–12 μ 10.537", "Inspection · Stage 1 · Serial",
+    "b 13–17 μ 15.59", "c 8–12 μ 10", "Inspection · Stage 2 · Parallel",
+  ]);
+  const [first, second] = b.sequence.stages;
+  assert.deepEqual(first.costs, { processing: 22.5, rework: { a: 15 }, scrap: { initial: 27, a: 27 } });
+  assert.deepEqual(first.variation.sigmas, [1]);
+  assert.deepEqual(second.features.map((f) => [f.name, f.processing]), [["b", 22.5], ["c", 5]]);
+  assert.deepEqual(second.variation.sigmas, [1, 1]);
+  // A new Feature in the shortcut costs 0 (C17); c keeps its costs.
+  assert.deepEqual(second.costs, { processing: 27.5, rework_per_feature: { b: 0, c: 1 }, scrap_per_feature: { b: 0, c: 2 } });
+  assert.deepEqual(b.sequence.means.values, [{ a: 10.537 }, { b: 15.59, c: 10 }]);
+  assert.equal(b.sequence.reference, undefined);
+});
+
+test("an Operation moved up into a full table adds its Rework States at the sum of their Features' Rework Costs", () => {
+  const b = twoStages();
+  b.setCost(0, "scrap", "initial", 30);
+  b.moveOperation(1, 0, -1);  // c
+  assert.deepEqual(b.rows.map(describe).slice(0, 4),
+    ["a 8–12 μ 10.537", "b 13–17 μ 15.59", "c 8–12 μ 10", "Inspection · Stage 1 · Parallel"]);
+  const { costs } = b.document.stages[0];
+  assert.deepEqual(costs.rework, { a: 15, b: 12, c: 0, "a+b": 27, "a+c": 15, "b+c": 12, "a+b+c": 27 });
+  assert.deepEqual(costs.scrap,
+    { initial: 30, a: 27, b: 27, c: 30, "a+b": 27, "a+c": 30, "b+c": 30, "a+b+c": 30 });
+  assert.equal(costs.processing, 50);
+  assert.deepEqual(b.document.stages[1].costs, { processing: 0, rework_per_feature: {}, scrap_per_feature: {} });
+  assert.deepEqual(b.problems.map((p) => p.message), ["Two Inspections in a row: Stage 2 has no Operations."]);
+});
+
+test("an Operation moved down past the last Inspection is left unclosed; moved back up, the list closes again", () => {
+  const b = twoStages();
+  b.moveOperation(1, 0, +1);
+  assert.deepEqual(b.rows.map(describe).slice(2),
+    ["Inspection · Stage 1 · Parallel", "Inspection · Stage 2 · no Operations", "c 8–12 μ 10"]);
+  assert.deepEqual(b.problems.map((p) => p.row), [3, 4]);
+  b.moveOperation(2, 0, -1);
+  assert.deepEqual(b.problems, []);
+  assert.deepEqual(b.sequence.stages[1].costs, { processing: 5, rework_per_feature: { c: 0 }, scrap_per_feature: { c: 0 } });
+  assert.equal(b.sequence.stages.length, 2);
+});
+
+test("moving an Operation between Stages moves its Processing Cost, flagging the later Stage's Scrap Costs", () => {
+  const b = twoStages();
+  b.addOperation("drill");
+  b.addInspection();  // Stage 3
+  b.moveOperation(1, 0, -1);  // c, 5, from Stage 2 to Stage 1: Stage 3's earlier total is unchanged
+  assert.deepEqual([0, 1, 2].map((i) => b.scrapNeedsCheck(i)), [false, true, false]);
+  assert.deepEqual(b.document.stages.map((s) => s.costs.processing), [50, 0, 2]);
+});
+
+test("an Inspection moved up or down regroups the Operations around it", () => {
+  const b = twoStages();
+  b.moveInspection(0, -1);  // past b
+  assert.deepEqual(b.rows.map(describe), [
+    "a 8–12 μ 10.537", "Inspection · Stage 1 · Serial",
+    "b 13–17 μ 15.59", "c 8–12 μ 10", "Inspection · Stage 2 · Parallel",
+  ]);
+  b.moveInspection(0, +1);  // back past b
+  b.moveInspection(0, +1);  // and past c
+  assert.deepEqual(b.rows.map(describe), [
+    "a 8–12 μ 10.537", "b 13–17 μ 15.59", "c 8–12 μ 10", "Inspection · Stage 1 · Parallel",
+    "Inspection · Stage 2 · no Operations",
+  ]);
+  b.moveInspection(0, -1);  // c out of Stage 1 into Stage 2
+  assert.deepEqual(b.problems, []);
+  assert.deepEqual(b.sequence.means.values, [{ a: 10.537, b: 15.59 }, { c: 10 }]);
+  assert.throws(() => b.moveInspection(1, +1), /nothing after/);
+
+  const empty = Builder.blank();
+  empty.addInspection();
+  assert.throws(() => empty.moveInspection(1, -1), /no Operations/);
+  b.addOperation();
+  assert.throws(() => b.moveInspection(2, -1), /Stage 3 has no Inspection/);
+  assert.throws(() => b.deleteInspection(2), /Stage 3 has no Inspection/);
+});
+
+test("moving the last Inspection up leaves the Operation after it unclosed; down closes it again", () => {
+  const b = twoStages();
+  b.moveInspection(1, -1);
+  assert.deepEqual(b.rows.map(describe).slice(2),
+    ["Inspection · Stage 1 · Parallel", "Inspection · Stage 2 · no Operations", "c 8–12 μ 10"]);
+  b.moveInspection(1, +1);
+  assert.deepEqual(b.problems, []);
+  assert.equal(b.rows.at(-1).label, "Inspection · Stage 2 · Serial");
+});
+
+test("a move that leaves an earlier total as it was, bar rounding, flags nothing", () => {
+  const b = Builder.blank();
+  for (const [k, cost] of [0.1, 0.2, 0.7, 1].entries()) {
+    if (k) { b.addOperation(); b.addInspection(); }
+    b.setFeature(k, 0, "processing", cost);
+    b.setCost(k, "scrap", `f${k + 1}`, 0);  // clears the markers so far
+  }
+  b.moveOperation(1, 0, +1);  // f2 into Stage 3: its earlier total drops by 0.2; Stage 4's is 1 either way
+  b.moveOperation(2, 0, -1);  // and back
+  assert.deepEqual([0, 1, 2, 3].map((i) => b.scrapNeedsCheck(i)), [false, false, true, false]);
+  b.deleteInspection(1);
+  assert.equal(b.scrapNeedsCheck(2), false);  // 0.1 + 0.2 + 0.7 against 0.1 + 0.9
+});
+
+test("deleting an Inspection merges its Operations into the next Stage, which keeps its own costs", () => {
+  const b = twoStages();
+  b.setInspection(1, "per_stage", 0.5);
+  b.deleteInspection(0);
+  assert.deepEqual(b.rows.map(describe),
+    ["a 8–12 μ 10.537", "b 13–17 μ 15.59", "c 8–12 μ 10", "Inspection · Stage 1 · Parallel"]);
+  const [stage] = b.sequence.stages;
+  assert.deepEqual(stage.costs,
+    { processing: 50, rework_per_feature: { a: 0, b: 0, c: 1 }, scrap_per_feature: { a: 0, b: 0, c: 2 } });
+  assert.deepEqual(stage.variation, { type: "normal", sigmas: [1, 1, 1], corr: 0 });
+  assert.deepEqual(stage.inspection, { per_stage: 0.5, per_feature: 0 });
+  assert.deepEqual(b.sequence.means.values, [{ a: 10.537, b: 15.59, c: 10 }]);
+  // c's Scrap Costs were cumulative over Stage 1's 45, which is no longer before them (C25).
+  assert.equal(b.scrapNeedsCheck(0), true);
+});
+
+test("deleting an Inspection is refused if the merged Stage would have more than 4 Operations", () => {
+  const b = twoStages();
+  b.addOperation();
+  b.addOperation();
+  b.addInspection();  // Stage 3: f1 f2
+  b.moveInspection(0, -1);  // b into Stage 2: b c
+  b.addOperation();
+  b.moveOperation(3, 0, -1);  // f3 into Stage 3: f1 f2 f3
+  const before = b.document;
+  assert.throws(() => b.deleteInspection(1), /Stage 2 would have 5 Operations; a Stage can have at most 4/);
+  assert.equal(b.document, before);
+  b.deleteInspection(0);  // a b c
+  assert.deepEqual(b.problems, []);
+});
+
+test("deleting the last Inspection leaves its Operations unclosed; an empty Stage's just goes", () => {
+  const b = twoStages();
+  b.deleteInspection(1);
+  assert.deepEqual(b.rows.map(describe).slice(2), ["Inspection · Stage 1 · Parallel", "c 8–12 μ 10"]);
+  b.addInspection();
+  assert.deepEqual(b.sequence.stages[1].costs, serialStage("c").costs);  // closed again, as it was
+
+  const empty = Builder.blank();
+  empty.addInspection();
+  empty.deleteInspection(1);
+  assert.deepEqual(empty.rows.map(describe), ["f1 8–12 μ 10", "Inspection · Stage 1 · Serial"]);
+  assert.deepEqual(empty.problems, []);
+});
+
+// Each row as name or "insp", then 1 or 0 for up and down, then an Inspection's canDelete.
+const flags = (b) => b.rows.map((r) => `${r.name ?? "insp"} ${+r.canMoveUp}${+r.canMoveDown}${r.canDelete ?? ""}`);
+
+test("rows say which moves and deletes are open, the ends of the list aside", () => {
+  const b = twoStages();
+  assert.deepEqual(flags(b), ["a 01", "b 11", "insp 11true", "c 11", "insp 10true"]);
+  b.addOperation();
+  assert.deepEqual(flags(b).slice(-2), ["insp 11true", "f1 10"]);
+  b.deleteOperation(1, 0);
+  assert.deepEqual(flags(b).slice(2), ["insp 10true", "insp 01true", "f1 10"]);  // nothing between the two Inspections
+});
+
+test("a Stage with preset-only variation locks its Operations and Inspection, and moves into it", () => {
+  const seq = twoStages().sequence;
+  seq.stages[0].variation.corr = [[1, 0.5], [0.5, 1]];
+  const b = new Builder(seq);
+  assert.deepEqual(flags(b), ["a 00", "b 00", "insp 00false", "c 01", "insp 10true"]);
+  assert.throws(() => b.moveOperation(0, 1, +1), /preset-only/);
+  assert.throws(() => b.moveOperation(1, 0, -1), /preset-only/);
+  assert.throws(() => b.moveInspection(0, -1), /preset-only/);
+  assert.throws(() => b.moveInspection(0, +1), /preset-only/);
+  assert.throws(() => b.deleteInspection(0), /preset-only/);
+  b.deleteInspection(1);  // Stage 2 isn't locked
+
+  const grouped = new Builder({ ...twoStages().sequence,
+    means: { scheme: "per_group_size", values: [{ 1: 10, 2: 10 }, { 1: 10 }] } });
+  assert.ok(grouped.rows.every((r) => !r.canMoveUp && !r.canMoveDown && !r.canDelete));
+  assert.throws(() => grouped.moveOperation(1, 0, -1), /read-only/);
+  assert.throws(() => grouped.moveInspection(0, -1), /read-only/);
+  assert.throws(() => grouped.deleteInspection(0), /read-only/);
 });
 
 test("a Stage removed with its last unclosed Operation leaves no check marker for the next one", () => {
