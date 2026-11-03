@@ -26,6 +26,7 @@ REFERENCE_QUANTITIES: tuple[Quantity, ...] = get_args(Quantity)
 INITIAL_KEY = "initial"
 FULL_COSTS = ("rework", "scrap")
 SHORTCUT_COSTS = ("rework_per_feature", "scrap_per_feature")  # C8
+PROCESSING_SUM_TOLERANCE = 1e-9  # a given Stage total may differ this much from its Features' sum (C22)
 
 Json = dict[str, Any]
 T = TypeVar("T")
@@ -50,10 +51,15 @@ class LoadedSequence:
     sequence: Sequence
     feature_means: tuple[Mapping[str, float], ...]
     reference: Reference | None = None
+    feature_processing: tuple[Mapping[str, float] | None, ...] = ()  # per Stage, when its Features carry them (C22)
 
     @property
     def means(self) -> tuple[MeanSettings, ...]:
         return tuple(MeanSettings.per_feature(s, mu) for s, mu in zip(self.sequence.stages, self.feature_means))
+
+    def stage_feature_processing(self, i: int) -> Mapping[str, float] | None:
+        """Stage i's per-Feature Processing Costs, or None if it has only a Stage total."""
+        return self.feature_processing[i] if i < len(self.feature_processing) else None
 
 
 def load_sequence(data: object) -> LoadedSequence:
@@ -65,20 +71,24 @@ def load_sequence(data: object) -> LoadedSequence:
     stages_data = _list(doc["stages"], "stages")
     if not stages_data:
         raise ValueError("stages: a Sequence needs at least one Stage")
-    stages = tuple(_load_stage(s, f"stages[{i}]") for i, s in enumerate(stages_data))
+    loaded_stages = [_load_stage(s, f"stages[{i}]") for i, s in enumerate(stages_data)]
+    stages = tuple(stage for stage, _ in loaded_stages)
+    feature_processing = tuple(processing for _, processing in loaded_stages)
     selling_price = _cost(doc["selling_price"], "selling_price")
     sequence = _at_path(lambda: Sequence(stages=stages, selling_price=selling_price), "stages")
     feature_means = _load_means(doc["means"], stages)
     reference = _load_reference(doc["reference"], "reference") if "reference" in doc else None
     name = _string(doc.get("name", ""), "name")
-    return LoadedSequence(name=name, sequence=sequence, feature_means=feature_means, reference=reference)
+    return LoadedSequence(name=name, sequence=sequence, feature_means=feature_means, reference=reference,
+                          feature_processing=feature_processing)
 
 
 def dump_sequence(loaded: LoadedSequence) -> Json:
     """Write sequence JSON. Cost tables are always written in full (C8), with state keys in Feature order (C7)."""
     doc: Json = {"format_version": FORMAT_VERSION, "name": loaded.name,
                  "selling_price": loaded.sequence.selling_price,
-                 "stages": [_dump_stage(stage) for stage in loaded.sequence.stages],
+                 "stages": [_dump_stage(stage, loaded.stage_feature_processing(i))
+                            for i, stage in enumerate(loaded.sequence.stages)],
                  "means": dump_means(loaded)}
     if loaded.reference is not None:
         doc["reference"] = dump_reference(loaded.reference)
@@ -107,21 +117,37 @@ def state_key(state: State, feature_names: tuple[str, ...]) -> str:
     return "+".join(n for n in feature_names if n in state)
 
 
-def _load_stage(data: object, path: str) -> Stage:
+def _load_stage(data: object, path: str) -> tuple[Stage, dict[str, float] | None]:
+    """The Stage, and its Features' Processing Costs when they carry them (C22)."""
     doc = _object(data, path, required={"features", "variation", "costs"}, optional={"inspection"})
     features_data = _list(doc["features"], f"{path}.features")
-    features = tuple(_load_feature(f, f"{path}.features[{i}]") for i, f in enumerate(features_data))
+    loaded_features = [_load_feature(f, f"{path}.features[{i}]") for i, f in enumerate(features_data)]
+    features = tuple(feature for feature, _ in loaded_features)
     names = tuple(f.name for f in features)
     if len(set(names)) != len(names):
         raise ValueError(f"{path}: Feature names must be unique within a Stage, got {list(names)}")
     variation = _load_variation(doc["variation"], f"{path}.variation", len(features))
-    costs = _load_costs(doc["costs"], f"{path}.costs", features)
+    processing = _feature_processing(loaded_features, path)
+    costs = _load_costs(doc["costs"], f"{path}.costs", features, processing)
     inspection = _load_inspection(doc.get("inspection", {}), f"{path}.inspection")
-    return _at_path(lambda: Stage(features=features, variation=variation, costs=costs, inspection=inspection), path)
+    stage = _at_path(lambda: Stage(features=features, variation=variation, costs=costs, inspection=inspection), path)
+    return stage, processing
 
 
-def _load_feature(data: object, path: str) -> Feature:
-    doc = _object(data, path, required={"name", "lower", "upper", "rework_side"})
+def _feature_processing(loaded: list[tuple[Feature, float | None]], path: str) -> dict[str, float] | None:
+    """Every Feature's Processing Cost, or None when no Feature has one; some but not all is an error."""
+    without = [i for i, (_, cost) in enumerate(loaded) if cost is None]
+    if len(without) == len(loaded):
+        return None
+    if without:
+        raise ValueError(f"{path}.features[{without[0]}].processing: missing; give a Processing Cost for every "
+                         f"Feature of the Stage or for none")
+    return {feature.name: cost for feature, cost in loaded if cost is not None}
+
+
+def _load_feature(data: object, path: str) -> tuple[Feature, float | None]:
+    """The Feature, and its Operation's Processing Cost if given (C22)."""
+    doc = _object(data, path, required={"name", "lower", "upper", "rework_side"}, optional={"processing"})
     name = _string(doc["name"], f"{path}.name")
     if not FEATURE_NAME.fullmatch(name):
         raise ValueError(f"{path}.name: Feature names are 1 to 16 letters, digits or underscores, got {name!r}")
@@ -130,9 +156,11 @@ def _load_feature(data: object, path: str) -> Feature:
     sides = [s.value for s in ReworkSide]
     if doc["rework_side"] not in sides:
         raise ValueError(f"{path}.rework_side: must be one of {sides}, got {doc['rework_side']!r}")
-    return _at_path(lambda: Feature(name, lower=_number(doc["lower"], f"{path}.lower"),
-                                 upper=_number(doc["upper"], f"{path}.upper"),
-                                 rework_side=ReworkSide(doc["rework_side"])), path)
+    feature = _at_path(lambda: Feature(name, lower=_number(doc["lower"], f"{path}.lower"),
+                                    upper=_number(doc["upper"], f"{path}.upper"),
+                                    rework_side=ReworkSide(doc["rework_side"])), path)
+    processing = _cost(doc["processing"], f"{path}.processing") if "processing" in doc else None
+    return feature, processing
 
 
 def _load_variation(data: object, path: str, n_features: int) -> MultivariateNormal:
@@ -149,27 +177,48 @@ def _load_variation(data: object, path: str, n_features: int) -> MultivariateNor
     return _at_path(lambda: MultivariateNormal(sigmas, corr), path)
 
 
-def _load_costs(data: object, path: str, features: tuple[Feature, ...]) -> CostTable:
-    """Full state tables, or the per-Feature shortcut for `CostTable.additive` (C8), never both."""
+def _load_costs(data: object, path: str, features: tuple[Feature, ...],
+                feature_processing: dict[str, float] | None) -> CostTable:
+    """Full state tables, or the per-Feature shortcut for `CostTable.additive` (C8), never both.
+
+    With `feature_processing`, `processing` may be omitted and the Stage's Processing Cost is their sum (C22).
+    """
     names = tuple(f.name for f in features)
     states = enumerate_states(features)
     keys = set(_object(data, path))
     shortcut = bool(keys & set(SHORTCUT_COSTS))
+    # With per-Feature Processing Costs the Stage total is optional (C22).
+    required: set[str] = {"processing"} if feature_processing is None else set()
+    optional = {"processing"} - required
     if shortcut and keys & set(FULL_COSTS):
         raise ValueError(f"{path}: give either rework and scrap tables or rework_per_feature and "
                          f"scrap_per_feature, not a mix")
     if shortcut:
-        doc = _object(data, path, required={"processing", *SHORTCUT_COSTS}, optional=())
+        doc = _object(data, path, required=required | set(SHORTCUT_COSTS), optional=optional)
         reworkable = [f.name for f in features if f.reworkable]
         rework = _per_feature(doc["rework_per_feature"], f"{path}.rework_per_feature", reworkable,
                               "the reworkable Features")
         scrap = _per_feature(doc["scrap_per_feature"], f"{path}.scrap_per_feature", list(names))
-        return _at_path(lambda: CostTable.additive(_cost(doc["processing"], f"{path}.processing"), rework, scrap),
-                        path)
-    doc = _object(data, path, required={"processing", *FULL_COSTS}, optional=())
-    return _at_path(lambda: CostTable(processing=_cost(doc["processing"], f"{path}.processing"),
+        processing = _stage_processing(doc, path, feature_processing)
+        return _at_path(lambda: CostTable.additive(processing, rework, scrap), path)
+    doc = _object(data, path, required=required | set(FULL_COSTS), optional=optional)
+    processing = _stage_processing(doc, path, feature_processing)
+    return _at_path(lambda: CostTable(processing=processing,
                                    rework=_state_table(doc["rework"], f"{path}.rework", states[1:], names),
                                    scrap=_state_table(doc["scrap"], f"{path}.scrap", states, names)), path)
+
+
+def _stage_processing(doc: Json, path: str, feature_processing: dict[str, float] | None) -> float:
+    """The given Stage total, or the Features' sum (C22)."""
+    if feature_processing is None:
+        return _cost(doc["processing"], f"{path}.processing")
+    total = math.fsum(feature_processing.values())
+    if "processing" in doc:
+        given = _cost(doc["processing"], f"{path}.processing")
+        if abs(given - total) > PROCESSING_SUM_TOLERANCE:
+            raise ValueError(f"{path}.processing: must equal the sum of the Features' Processing Costs, {total!r}, "
+                             f"got {given!r}")
+    return total
 
 
 def _per_feature(data: object, path: str, names: list[str], described_as: str = "") -> dict[str, float]:
@@ -241,7 +290,7 @@ def _load_reference(data: object, path: str) -> Reference:
                      tolerance=_cost(doc["tolerance"], f"{path}.tolerance"), note=note)
 
 
-def _dump_stage(stage: Stage) -> Json:
+def _dump_stage(stage: Stage, feature_processing: Mapping[str, float] | None) -> Json:
     names = stage.feature_names
     variation = stage.variation
     if not isinstance(variation, MultivariateNormal):
@@ -249,9 +298,13 @@ def _dump_stage(stage: Stage) -> Json:
     off_diagonal = {variation.corr[i][j] for i in range(len(names)) for j in range(len(names)) if i != j}
     if len(off_diagonal) > 1:
         raise ValueError("only a scalar correlation can be written")
+    features: list[Json] = [{"name": f.name, "lower": f.lower, "upper": f.upper, "rework_side": f.rework_side.value}
+                            for f in stage.features]
+    if feature_processing is not None:
+        for feature in features:
+            feature["processing"] = feature_processing[feature["name"]]
     return {
-        "features": [{"name": f.name, "lower": f.lower, "upper": f.upper, "rework_side": f.rework_side.value}
-                     for f in stage.features],
+        "features": features,
         "variation": {"type": "normal", "sigmas": list(variation.sigmas),
                       "corr": off_diagonal.pop() if off_diagonal else 0.0},
         "costs": {"processing": stage.costs.processing,

@@ -9,6 +9,7 @@ import pytest
 from oms.formats import dump_sequence, load_sequence, run
 
 PRESETS = Path(__file__).resolve().parents[1] / "presets"
+DELETE = object()  # in a test document, deletes the field
 
 
 def preset(name):
@@ -212,6 +213,76 @@ class TestCostShortcut:
         assert costs["scrap"] == {"initial": 27, "a": 27}
 
 
+def r4_with_feature_processing(a=20, b=25, total=DELETE):
+    """r4 with Processing Costs on its Features; the Stage total is left out unless given."""
+    doc = preset("r4")
+    for feature, cost in zip(doc["stages"][0]["features"], (a, b)):
+        if cost is not DELETE:
+            feature["processing"] = cost
+    if total is DELETE:
+        del doc["stages"][0]["costs"]["processing"]
+    else:
+        doc["stages"][0]["costs"]["processing"] = total
+    return doc
+
+
+class TestFeatureProcessing:
+    """C22: each Feature (Operation) may carry its own Processing Cost; the Stage's is their sum."""
+
+    def test_the_stage_total_may_be_omitted(self):
+        assert run(r4_with_feature_processing()) == run(preset("r4"))
+
+    def test_a_stage_total_matching_the_sum_to_1e_9_is_accepted(self):
+        assert run(r4_with_feature_processing(total=45 + 5e-10)) == run(preset("r4"))
+
+    @pytest.mark.parametrize("total", [44, 45 + 2e-9])
+    def test_a_stage_total_differing_from_the_sum_is_rejected(self, total):
+        with pytest.raises(ValueError) as error:
+            load_sequence(r4_with_feature_processing(total=total))
+        assert str(error.value).startswith(f"stages[0].costs.processing: must equal the sum of the Features' "
+                                           f"Processing Costs, 45.0, got {float(total)!r}")
+
+    @pytest.mark.parametrize("total", [DELETE, 45])
+    def test_some_but_not_all_features_having_one_is_rejected(self, total):
+        with pytest.raises(ValueError) as error:
+            load_sequence(r4_with_feature_processing(b=DELETE, total=total))
+        assert str(error.value).startswith("stages[0].features[1].processing: missing; give a Processing Cost for "
+                                           "every Feature of the Stage or for none")
+
+    def test_without_them_the_stage_total_is_still_required(self):
+        with pytest.raises(ValueError) as error:
+            load_sequence(r4_with_feature_processing(a=DELETE, b=DELETE))
+        assert str(error.value).startswith("stages[0].costs: missing processing")
+
+    def test_dumping_writes_them_and_the_stage_total(self):
+        dumped = dump_sequence(load_sequence(r4_with_feature_processing()))
+        assert dumped == r4_with_feature_processing(total=45.0)
+        assert load_sequence(dumped) == load_sequence(r4_with_feature_processing())
+
+    def test_work_with_the_cost_shortcut(self):
+        doc = r4_with_feature_processing()
+        doc["stages"][0]["costs"] = {k: v for k, v in R4_SHORTCUT.items() if k != "processing"}
+        assert run(doc) == run(preset("r4"))
+        assert dump_sequence(load_sequence(doc)) == r4_with_feature_processing(total=45.0)
+
+    def test_a_shortcut_total_differing_from_the_sum_is_rejected(self):
+        doc = r4_with_feature_processing()
+        doc["stages"][0]["costs"] = {**R4_SHORTCUT, "processing": 40}
+        with pytest.raises(ValueError, match=r"^stages\[0\]\.costs\.processing: must equal the sum"):
+            load_sequence(doc)
+
+    def test_only_stages_with_them_dump_them(self):
+        doc = sequence_doc([stage_doc("a", 8.0, 12.0, pc=25.0), stage_doc("b", 1.0, 2.0, pc=5.0)],
+                           [{"a": 10.6}, {"b": 1.5}])
+        doc["stages"][1]["features"][0]["processing"] = 5.0
+        assert json.loads(json.dumps(dump_sequence(load_sequence(doc)))) == doc
+
+    def test_a_negative_one_is_rejected(self):
+        with pytest.raises(ValueError) as error:
+            load_sequence(r4_with_feature_processing(a=-1))
+        assert str(error.value).startswith("stages[0].features[0].processing: must be non-negative")
+
+
 class TestStateKeys:
     """C7: "initial" and Feature names joined by '+'; order ignored when parsing, Feature order when writing."""
 
@@ -354,9 +425,6 @@ def broken(path, value):
     else:
         target[path[-1]] = value
     return doc
-
-
-DELETE = object()
 
 
 class TestMalformedInput:

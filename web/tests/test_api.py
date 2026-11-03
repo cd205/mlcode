@@ -132,6 +132,34 @@ def test_missing_state_key_is_422_naming_the_state():
     assert_readable_error(response, 422, "stages[0].costs.rework", "missing state a+b")
 
 
+def r4_with_feature_processing(a, b):
+    """r4 with Processing Costs on its Features (C22) and no Stage total."""
+    sequence = client.get("/api/presets/r4").json()
+    for feature, cost in zip(sequence["stages"][0]["features"], (a, b)):
+        if cost is not None:
+            feature["processing"] = cost
+    del sequence["stages"][0]["costs"]["processing"]
+    return sequence
+
+
+def test_per_feature_processing_costs_evaluate_as_their_stage_total():
+    response = client.post("/api/evaluate", json={"sequence": r4_with_feature_processing(20, 25)})
+    assert response.status_code == 200
+    assert response.json()["reference"]["within_tolerance"]
+
+
+def test_stage_total_differing_from_the_feature_sum_is_422():
+    sequence = r4_with_feature_processing(20, 25)
+    sequence["stages"][0]["costs"]["processing"] = 40
+    response = client.post("/api/evaluate", json={"sequence": sequence})
+    assert_readable_error(response, 422, "stages[0].costs.processing", "must equal the sum")
+
+
+def test_processing_cost_on_only_some_features_is_422():
+    response = client.post("/api/evaluate", json={"sequence": r4_with_feature_processing(20, None)})
+    assert_readable_error(response, 422, "stages[0].features[1].processing", "missing")
+
+
 def test_request_without_a_sequence_is_422_with_a_readable_message():
     response = client.post("/api/evaluate", json={"n_parts": 10})
     assert_readable_error(response, 422, "sequence")

@@ -1,6 +1,7 @@
 # OMS Web App: Prototype Plan
 
-Status: **approved 2026-10-27** (W0 done in a grilling session). Nothing in this plan is built yet. Work through
+Status: **approved 2026-10-27** (W0 done in a grilling session). Sequence list builder (C19–C26, §7.1, spec #35, tickets #36–#40)
+**approved 2026-11-02** in a second grilling session. Nothing in this plan is built yet. Work through
 the §8 tickets (#23–#33), blockers first. Each ticket ends with green `uv run pytest` and something you can run.
 
 This plan builds on:
@@ -48,6 +49,14 @@ prototype has been used.
 | C16 | After *Optimise*, the optimised Mean Settings **replace** the sequence's `means` (same scheme). The previous means are kept in one undo slot. | *Evaluate* and *Download* then use what was just found. |
 | C17 | **Builder defaults** for a new Feature: next unused name `f1`, `f2`, …; L=8, U=12; Rework Side `upper`; σ=1; rework and scrap cost 0; Mean Setting (L+U)/2, which follows L and U until the user types a mean. | *Evaluate* works straight after *Add Feature*. |
 | C18 | Engine `ValueError`s return **422** with their message, the same as schema errors. Any other exception returns a 500 with a generic message, and the traceback goes only to the server log. | Readable errors; no code leaks (ADR 0005). |
+| C19 | The builder is a flat **Sequence list** of Operations and Inspections (GLOSSARY: Sequence); Stages are derived as "the Operations up to and including each Inspection". It replaces the Stage cards. The sequence JSON stays Stage-based (C2). | Matches how users think about a process: Inspection after every Operation is Serial, several Operations before one Inspection is Parallel. |
+| C20 | One **Operation is one Feature** (GLOSSARY). Its name is the Feature name; the name box suggests `turn`, `drill`, `mill`, `bore`, `grind`; a repeated name defaults to `drill2`, etc. No separate "kind" field. | Maps straight onto the engine. Operations making several Features can come later. |
+| C21 | A Sequence list is **valid** only if it ends with an Inspection, has no two Inspections in a row, at most 4 Operations per Stage and at most 6 Inspections. An invalid list shows a warning and disables *Evaluate* and *Optimise*; the builder never fixes it silently. | The engine needs every Stage to end in an Inspection; limits match §6. |
+| C22 | Features gain an optional **`processing`** cost. When every Feature of a Stage has one, the Stage's `costs.processing` is their sum (it may be omitted; if given, it must match to 1e-9, else 422). Some but not all Features having one is a 422. `dump_sequence` writes both. `format_version` stays 1. | Each Operation has its own cost; old files still load; the engine is unchanged. |
+| C23 | A new Operation's Processing Cost is **nominal**: turn 3, drill 2, mill 4, bore 3, grind 5, otherwise 1. It follows the name until the user types a cost (like the Mean Setting in C17). | *Evaluate* works straight away with plausible costs. Placeholder values. |
+| C24 | A preset's Stage Processing Cost is **split evenly** across its Operations when loaded, with a note on the Inspection row. Preset files are unchanged. | Sums, and so all results and reference checks, are unchanged. |
+| C25 | Moving rows keeps C9: Scrap Costs are never adjusted. When earlier Stages' Processing Costs change, the Inspection row's hint updates and its Scrap Cost fields get an amber "check" marker until edited. | Cumulative Scrap Cost stays a visible modelling choice. |
+| C26 | A **sequence chain** diagram sits above the OMS diagram: Operation boxes, Inspection diamonds, and a "Stage n · Serial/Parallel" bracket under each Stage. It redraws on every edit in the browser; clicking an item selects its row. | Shows how Operations and Inspections become Stages, without calling the server. |
 
 Privacy in practice: the GitHub repo `cd205/mlcode` must stay private (or `oms` moves to a private package if the
 web code is ever made public); API errors never return Python tracebacks.
@@ -101,7 +110,8 @@ R5 (two Serial Stages) is the same shape with two entries in `stages`, one Featu
   the Sequence; `rework_side` is `upper`, `lower` or `none` (C7).
 - **States**: `"initial"` and `+`-joined Feature names; parsing ignores order (C7).
 - **Costs**: full tables as above, or `{"processing", "rework_per_feature", "scrap_per_feature"}`; Scrap Costs
-  are cumulative (C8, C9).
+  are cumulative (C8, C9). Features may carry `processing`, the Operation's Processing Cost; then the Stage's
+  `processing` is their sum (C22).
 - **Variation**: `normal` (sigmas, corr scalar or matrix) or `gaussian_copula` (marginals by allow-listed SciPy
   name and parameters, centred on 0 as in ADR 0004, plus corr) (C11).
 - **Means**: `scheme` plus one entry per Stage, in the shape that scheme needs (C10).
@@ -174,6 +184,26 @@ outgrows it):
   preset-only, its Features can't be added, removed or moved, nor (for a scheme) their Rework Sides
   changed; a Stage with preset-only variation can still be moved or deleted. Switching a scheme to `per_feature` is left to #28.
 
+### 7.1 Sequence list builder (W3b, 2026-11-02)
+
+Replaces the Stage cards in the left panel (C19–C26). The side-by-side layout stays: builder left, diagrams and
+results right.
+
+- **Rows.** An Operation row shows name, L–U and Mean Setting; an Inspection row shows "Inspection · Stage n ·
+  Serial/Parallel". Clicking a row expands its editor inline, one at a time.
+- **Operation editor:** name (suggestions, C20), L, U, Rework Side, σ, Mean Setting, Processing Cost (nominal
+  default, C23).
+- **Inspection editor:** correlation, Rework/Scrap Cost table (shortcut or full, C8, C9), Inspection Cost (per
+  Stage, per Feature), the hint of earlier Stages' Processing Costs and the "check" marker (C25), the even-split
+  note for presets (C24).
+- **Editing.** *Add Operation* and *Add Inspection* append to the end; ↑ ↓ ✕ move or delete a row. An
+  Operation moved past an Inspection moves its Feature into the neighbouring Stage, under the §7 cost rules.
+  Moving an Inspection moves several Features at once, under the same rules. Deleting an Inspection merges its
+  Stage into the next, and is refused with a message if that Stage would have more than 4 Operations.
+  Preset-only locks apply: Operations of a locked Stage can't move, nor can its Inspection.
+- **Validity** (C21): warnings in the list; *Evaluate* and *Optimise* disabled until it is valid.
+- **Sequence chain** (C26) at the top of the right panel, above the OMS diagram.
+
 ## 8. Staged plan
 
 **W0: Agree the open decisions (no code).** *Done 2026-10-27*: §2 C6–C18, ADR 0005, and the glossary term Pass.
@@ -194,7 +224,14 @@ ticket by ticket; together the tickets cover every preset (C13) and every §5–
 | #30 | 7: copula Process Variation (R9) | #28 |
 | #31 | 8: builder editing; download and upload | #26 |
 | #32 | 9: request limits and timing (W-U4) | #27, #29 |
-| #33 | 10: prototype review (human), with W-U1 | #25, #28–#32 |
+| #36 | 11: per-Operation Processing Cost in the sequence format (C22) | – |
+| #37 | 12: Sequence list editor: rows, adding, validity (C19–C21) | – |
+| #38 | 13: Processing Cost on each Operation; even split; Scrap Cost "check" marker (C23–C25) | #36, #37 |
+| #39 | 14: moves that change Stages | #38 |
+| #40 | 15: sequence chain diagram (C26) | #37 |
+| #33 | 10: prototype review (human), with W-U1 | #25, #28–#32, #36–#40 |
+
+Tickets 11–15 are sub-issues of the spec #35.
 
 These replace the earlier layer-by-layer issues #18–#21.
 

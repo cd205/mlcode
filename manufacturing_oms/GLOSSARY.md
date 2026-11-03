@@ -13,18 +13,22 @@ The lower (L) and upper (U) bounds that a Feature's measured value must lie with
 _Avoid_: tolerance band, spec
 
 **Rework Side**:
-The side of a Feature's Specification Limits where an out-of-spec value can still be corrected by further processing. The other side is the Scrap Side. It depends on the operation, so it is always defined for each Feature and never assumed. It may be *none*, in which case both sides scrap and the Feature never appears in a Rework State.
+The side of a Feature's Specification Limits where an out-of-spec value can still be corrected by further processing. The other side is the Scrap Side. It depends on the Operation, so it is always defined for each Feature and never assumed. It may be *none*, in which case both sides scrap and the Feature never appears in a Rework State.
 _Avoid_: rework direction
 
 ## Production structure
 
+**Operation**:
+The processing that produces one Feature, such as turning, drilling or milling. Its name is the Feature's name. Every Operation produces a Feature; processing that produces nothing inspected is counted in a neighbouring Operation's Processing Cost. Rework repeats the Operation; it is not a separate Operation.
+_Avoid_: process, machining step, step
+
 **Stage**:
-The processing of one or more Features, followed by one Inspection, together with the rework and scrap loop that Inspection triggers.
-_Avoid_: operation, step, station
+One or more Operations followed by one Inspection, together with the rework and scrap loop that Inspection triggers.
+_Avoid_: station
 
 **Sequence**:
-The ordered grouping of a part's Features into Stages, which fixes where Inspections happen relative to the order the Features are made.
-_Avoid_: operation sequence, route, process plan
+The ordered list of a part's Operations and Inspections; each Inspection closes a Stage made of the Operations before it.
+_Avoid_: operation sequence, step list, route, process plan
 
 **Serial**:
 A Sequence arrangement in which each Stage contains a single Feature.
@@ -70,7 +74,7 @@ The probability r_i that a part started reaches Stage i of a Sequence: the produ
 ## Process settings
 
 **Mean Setting**:
-The controllable target value around which a process produces a Feature. A Feature may have different Mean Settings for the initial operation and for each Rework State.
+The controllable target value around which a process produces a Feature. A Feature may have different Mean Settings for its Operation (from the Initial State) and for each Rework State.
 _Avoid_: target, nominal, mu
 
 **Process Variation**:
@@ -83,7 +87,7 @@ _Avoid_: noise, uncertainty, sigma
 The revenue earned for each part that conforms at the end of the Sequence.
 
 **Processing Cost**:
-The cost of a Stage's initial operation, incurred by every part that reaches the Stage.
+The cost of a Stage's Operations, incurred by every part that reaches the Stage. It may be given for each Operation, in which case the Stage's Processing Cost is their sum.
 
 **Rework Cost**:
 The cost incurred each time a part passes through a given Rework State.
