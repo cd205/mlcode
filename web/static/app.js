@@ -194,6 +194,13 @@ function operationEditor(i, j, name) {
   const sigmas = () => b.document.stages[i].variation.sigmas;
   if (b.variationEditable(i)) field("σ", numberInput(() => sigmas()[j], (v) => b.setSigma(i, j, v)));
   else box.append(el("p", { className: "muted" }, `σ ${sigmas()?.[j] ?? "–"} (preset-only, read-only)`));
+  const processing = numberInput(() => feature().processing, (v) => b.setFeature(i, j, "processing", v));
+  bindings.push(() => {
+    const auto = b.isAutoProcessing(feature().name);
+    processing.classList.toggle("auto", auto);
+    processing.title = auto ? "A nominal cost for the Operation's name until you type a cost" : "";
+  });
+  field("Processing Cost", processing);
   const mu = () => b.document.means.values[i]?.[name];
   if (b.meansEditable) {
     const mean = numberInput(() => fmtMean(mu()), (v) => b.setMean(i, name, v), "mean");
@@ -232,14 +239,18 @@ function inspectionEditor(i) {
 }
 
 // One row per Feature (shortcut) or per state (full table), C8. Scrap Cost is cumulative and never summed for the
-// user; the earlier Stages' Processing Costs are shown beside it as a hint (C9).
+// user; the earlier Stages' Processing Costs are shown beside it as a hint, and its fields are marked for checking
+// when those change (C9, C25). The Stage's Processing Cost is its Operations' sum, edited on the Operations (C22).
 function costEditor(i) {
   const b = builder;
   const { costs } = b.document.stages[i];
   const shortcut = "rework_per_feature" in costs;
   const wrap = el("div", { className: "costs" });
-  wrap.append(el("label", { className: "inline" }, "Processing Cost (this Stage)",
-    numberInput(() => b.document.stages[i].costs.processing, (v) => b.setProcessing(i, v))));
+  wrap.append(live(el("p"), () => {
+    const note = b.processingNote(i);
+    return `Processing Cost (this Stage): ${fmtMean(b.document.stages[i].costs.processing)}, the sum of its ` +
+      `Operations'${note ? ` (${note})` : ""}`;
+  }));
   const mode = el("select", {}, new Option("per Feature", "shortcut"), new Option("full table, by state", "full"));
   if (!b.canUseShortcut(i)) {
     mode.options[0].disabled = true;
@@ -259,8 +270,7 @@ function costEditor(i) {
     tr.insertCell().append(key in costs[reworkTable]
       ? numberInput(() => b.document.stages[i].costs[reworkTable][key], (v) => b.setCost(i, "rework", key, v))
       : "–");
-    tr.insertCell().append(numberInput(() => b.document.stages[i].costs[scrapTable][key],
-      (v) => b.setCost(i, "scrap", key, v)));
+    tr.insertCell().append(scrapInput(i, scrapTable, key));
   }
   wrap.append(el("div", { className: "scroll" }, table));
   if (shortcut) {
@@ -269,9 +279,23 @@ function costEditor(i) {
   }
   if (i > 0) {
     wrap.append(live(el("p", { className: "muted" }), () => "Earlier Stages' Processing Costs: " +
-      b.earlierProcessing(i).map((c, k) => `${c} (Stage ${k + 1})`).join(", ")));
+      b.earlierProcessing(i).map((c, k) => `${fmtMean(c)} (Stage ${k + 1})`).join(", ")));
   }
   return wrap;
+}
+
+// A Scrap Cost field, amber with "check" beside it while the earlier Stages' Processing Costs have changed (C25).
+function scrapInput(i, table, key) {
+  const b = builder;
+  const input = numberInput(() => b.document.stages[i].costs[table][key], (v) => b.setCost(i, "scrap", key, v));
+  const marker = el("span", { className: "check-marker" }, "check");
+  bindings.push(() => {
+    const check = b.scrapNeedsCheck(i);
+    input.classList.toggle("check", check);
+    input.title = check ? "Earlier Stages' Processing Costs changed: check this cumulative Scrap Cost" : "";
+    marker.hidden = !check;
+  });
+  return el("span", { className: "scrap-cell" }, input, marker);
 }
 
 function showResults(results) {

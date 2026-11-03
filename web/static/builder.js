@@ -12,6 +12,8 @@ const INITIAL = "initial";
 export const DEFAULT_FEATURE = { lower: 8, upper: 12, rework_side: "upper", sigma: 1 };  // C17
 export const REWORK_SIDES = ["upper", "lower", "none"];
 export const OPERATION_NAMES = ["turn", "drill", "mill", "bore", "grind"];  // C20
+// A new Operation's Processing Cost by name, numbered names too (drill2); any other name costs 1 (C23).
+const NOMINAL_PROCESSING = { turn: 3, drill: 2, mill: 4, bore: 3, grind: 5 };
 const MAX_OPERATIONS = 4;  // per Stage (C21, §6)
 const MAX_INSPECTIONS = 6;
 
@@ -19,11 +21,25 @@ export class Builder {
   #doc;  // the sequence file's fields, with the Stages as above
   #open = false;  // the last Stage has no Inspection yet
   #revision = 0;
-  #autoMeans;  // names of Features whose Mean Setting still follows L and U (C17)
+  #autoMeans = new Set();  // names of Features whose Mean Setting still follows L and U (C17)
+  #autoProcessing = new Set();  // names of Operations whose Processing Cost still follows their name (C23)
+  #splitStages = new Set();  // indices of Stages whose Processing Cost was split evenly on loading (C24)
+  #checkScrap = new Set();  // indices of Stages whose Scrap Costs to check: earlier Processing Costs changed (C25)
 
+  // A Stage whose Operations carry no Processing Costs (a preset) has its total split evenly across them, which
+  // keeps the total, and so every result, unchanged (C24).
   constructor(sequence) {
     this.#doc = structuredClone(sequence);
-    this.#autoMeans = new Set();
+    this.#doc.stages.forEach((stage, i) => {
+      const { features, costs } = stage;
+      if (!features.length) return;
+      if (features.every((f) => f.processing === undefined)) {
+        for (const f of features) f.processing = costs.processing / features.length;
+        this.#splitStages.add(i);
+      } else if (costs.processing === undefined) {
+        syncProcessing(stage);
+      }
+    });
   }
 
   // One Operation and its Inspection; Selling Price and costs 0.
@@ -117,8 +133,16 @@ export class Builder {
 
   isAutoMean(name) { return this.#autoMeans.has(name); }
 
+  isAutoProcessing(name) { return this.#autoProcessing.has(name); }
+
+  // The note on Stage i's Processing Cost while it is still the preset's total split evenly (C24), else null.
+  processingNote(i) { return this.#splitStages.has(i) ? "split evenly from the preset's Stage total" : null; }
+
   // The earlier Stages' Processing Costs: the hint beside a cumulative Scrap Cost (C9).
   earlierProcessing(i) { return this.#doc.stages.slice(0, i).map((s) => s.costs.processing); }
+
+  // True from when the earlier Stages' Processing Costs change until one of Stage i's Scrap Costs is edited (C25).
+  scrapNeedsCheck(i) { return this.#checkScrap.has(i); }
 
   // A full table can become the per-Feature shortcut only when it is additive, so nothing is lost (C8).
   canUseShortcut(i) {
@@ -146,6 +170,13 @@ export class Builder {
         if (!REWORK_SIDES.includes(value)) throw new Error(`Rework Side must be one of ${REWORK_SIDES.join(", ")}.`);
         f.rework_side = value;
         syncCosts(seq.stages[i]);
+        return;
+      }
+      if (field === "processing") {
+        f.processing = cost(value, "Processing Cost");
+        this.#autoProcessing.delete(f.name);
+        this.#splitStages.delete(i);
+        syncProcessing(seq.stages[i]);
         return;
       }
       if (field !== "lower" && field !== "upper") throw new Error(`Unknown Feature field ${field}.`);
@@ -176,8 +207,6 @@ export class Builder {
     this.#edit((seq) => { seq.stages[i].variation.corr = number(value, "Correlation"); });
   }
 
-  setProcessing(i, value) { this.#edit((seq) => { seq.stages[i].costs.processing = cost(value, "Processing Cost"); }); }
-
   // `field` is per_stage or per_feature: an inspected part costs per_stage + per_feature × its Stage's Features.
   setInspection(i, field, value) {
     if (field !== "per_stage" && field !== "per_feature") throw new Error(`Unknown Inspection Cost ${field}.`);
@@ -195,6 +224,7 @@ export class Builder {
       if (!table || !(key in table)) throw new Error(`No ${kind} cost for ${key}.`);
       table[key] = cost(value, kind === "rework" ? "Rework Cost" : "Scrap Cost");
     });
+    if (kind === "scrap") this.#checkScrap.delete(i);
   }
 
   setCostMode(i, mode) {
@@ -229,8 +259,10 @@ export class Builder {
       stage.features.push(newFeature(chosen));
       stage.variation.sigmas.push(DEFAULT_FEATURE.sigma);
       syncCosts(stage);
+      syncProcessing(stage);
       seq.means.values[i][chosen] = midpoint(DEFAULT_FEATURE);
       this.#autoMeans.add(chosen);
+      this.#autoProcessing.add(chosen);
     }, true);
   }
 
@@ -249,6 +281,7 @@ export class Builder {
       if (closesOpen) {
         seq.stages.pop();
         seq.means.values.pop();
+        this.#checkScrap.delete(i);  // not to be inherited by the next Stage added
       }
     }, this.#open && !closesOpen);
   }
@@ -286,8 +319,11 @@ export class Builder {
     const [feature] = stage.features.splice(j, 1);
     stage.variation.sigmas.splice(j, 1);
     syncCosts(stage);
+    syncProcessing(stage);
+    this.#splitStages.delete(i);
     delete seq.means.values[i][feature.name];
     this.#autoMeans.delete(feature.name);
+    this.#autoProcessing.delete(feature.name);
   }
 
   #rename(i, j, value) {
@@ -307,6 +343,11 @@ export class Builder {
       }
       seq.means.values[i] = renameKeys(seq.means.values[i]);
       if (this.#autoMeans.delete(old)) this.#autoMeans.add(name);
+      if (this.#autoProcessing.delete(old)) {
+        this.#autoProcessing.add(name);
+        stage.features[j].processing = nominalProcessing(name);
+        syncProcessing(stage);
+      }
     });
   }
 
@@ -329,11 +370,16 @@ export class Builder {
   }
 
   // Applies `change` to a copy, which becomes the list, with `open` saying whether its last Stage is now open. An
-  // edited preset is no longer the thesis case, so its reference goes.
+  // edited preset is no longer the thesis case, so its reference goes. A Stage whose earlier Stages' Processing
+  // Costs now total differently has its Scrap Costs flagged for checking (C25).
   #edit(change, open = this.#open) {
     const seq = structuredClone(this.#doc);
+    const before = earlierProcessingTotals(this.#doc);
     change(seq);
     delete seq.reference;
+    earlierProcessingTotals(seq).forEach((total, i) => {
+      if (i < before.length && total !== before[i]) this.#checkScrap.add(i);
+    });
     this.#doc = seq;
     this.#open = open;
     this.#revision += 1;
@@ -342,7 +388,24 @@ export class Builder {
 
 function newFeature(name) {
   const { lower, upper, rework_side } = DEFAULT_FEATURE;
-  return { name, lower, upper, rework_side };
+  return { name, lower, upper, rework_side, processing: nominalProcessing(name) };
+}
+
+const nominalProcessing = (name) => NOMINAL_PROCESSING[name.replace(/\d+$/, "")] ?? 1;
+
+// For each Stage, the total Processing Cost of the Stages before it.
+function earlierProcessingTotals(seq) {
+  let total = 0;
+  return seq.stages.map((stage) => {
+    const earlier = total;
+    total += stage.costs.processing;
+    return earlier;
+  });
+}
+
+// The Stage's Processing Cost is the sum of its Operations' (C22).
+function syncProcessing(stage) {
+  stage.costs.processing = stage.features.reduce((sum, f) => sum + f.processing, 0);
 }
 
 const usedNames = (seq) => new Set(seq.stages.flatMap((s) => s.features.map((f) => f.name)));

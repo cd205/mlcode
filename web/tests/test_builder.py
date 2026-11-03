@@ -62,8 +62,34 @@ def test_every_preset_loads_as_a_valid_list_and_gives_its_reference_result(prese
     assert len(loaded["rows"]) == sum(len(s["features"]) + 1 for s in stages)
     shapes = [r["label"].rsplit(" · ", 1)[1] for r in loaded["rows"] if r["kind"] == "inspection"]
     assert shapes == ["Parallel" if len(s["features"]) > 1 else "Serial" for s in stages]
-    assert loaded["sequence"] == preset(preset_id)
+    assert loaded["sequence"] == with_split_processing(preset(preset_id))
     assert evaluate(loaded["sequence"])["reference"]["within_tolerance"]
+
+
+def with_split_processing(sequence):
+    """The sequence with each Stage's Processing Cost split evenly across its Operations (C24)."""
+    for stage in sequence["stages"]:
+        for feature in stage["features"]:
+            feature["processing"] = stage["costs"]["processing"] / len(stage["features"])
+    return sequence
+
+
+@pytest.mark.parametrize("preset_id", ["r4", "r8-seq3"])
+def test_a_preset_split_into_operation_costs_gives_the_same_results(preset_id):
+    loaded = build("", preset(preset_id))
+    assert evaluate(loaded) == evaluate(preset(preset_id))
+
+
+def test_operation_processing_costs_go_to_the_server_and_come_back_from_a_download():
+    edits = 'b.setFeature(0, 0, "processing", 30); b.addOperation("grind"); b.addOperation("drill"); b.addInspection();'
+    sequence = build(edits, preset("r4"))
+    assert [[f["processing"] for f in s["features"]] for s in sequence["stages"]] == [[30, 22.5], [5, 2]]
+    assert [s["costs"]["processing"] for s in sequence["stages"]] == [52.5, 7]
+    results = evaluate(sequence)
+    assert [s["costs"]["processing"] / s["reach_probability"] for s in results["stages"]] == pytest.approx([52.5, 7])
+    reloaded = build("b = Builder.upload(b.download());", sequence,
+                     result="{ sequence: b.sequence, notes: [0, 1].map((i) => b.processingNote(i)) }")
+    assert reloaded == {"sequence": sequence, "notes": [None, None]}
 
 
 @pytest.mark.parametrize("preset_id", ["r1", "r4", "r8-seq3"])
@@ -87,7 +113,7 @@ def test_an_edited_preset_evaluates_without_its_thesis_reference():
         b.setSigma(1, 0, 0.8);
         b.setCorr(0, 0);
         b.setCost(1, "scrap", "bore", 30);
-        b.setProcessing(0, 26);
+        b.setFeature(0, 0, "processing", 26);
         b.setSellingPrice(125);
     """
     sequence = build(edits, preset("r5"))
