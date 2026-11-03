@@ -1,31 +1,46 @@
-// The builder's edits to a sequence document (web_app_plan.md §4, §7). No DOM here: the page calls these and
-// redraws; the tests drive them through node. Every edit replaces `sequence` with a new object, so the page can
-// tell that the sequence changed while a request was in flight.
+// The builder's edits to a Sequence list (web_app_plan.md §4, §7, §7.1). No DOM here: the page calls these and
+// redraws; the tests drive them through node. Every edit bumps `revision`, so the page can tell that the list
+// changed while a request was in flight.
+//
+// The list is held as the sequence file's Stages (C19): each Stage's Operations, then its Inspection. It may be
+// invalid while it is being built (C21): the last Stage may be open (Operations after the last Inspection) and a
+// Stage may be empty (an Inspection with no Operations before it). `problems` says what is wrong, and `sequence`
+// is only handed out when nothing is.
 
 const FEATURE_NAME = /^[A-Za-z0-9_]{1,16}$/;
 const INITIAL = "initial";
 export const DEFAULT_FEATURE = { lower: 8, upper: 12, rework_side: "upper", sigma: 1 };  // C17
 export const REWORK_SIDES = ["upper", "lower", "none"];
+export const OPERATION_NAMES = ["turn", "drill", "mill", "bore", "grind"];  // C20
+const MAX_OPERATIONS = 4;  // per Stage (C21, §6)
+const MAX_INSPECTIONS = 6;
 
 export class Builder {
-  #sequence;
+  #doc;  // the sequence file's fields, with the Stages as above
+  #open = false;  // the last Stage has no Inspection yet
+  #revision = 0;
   #autoMeans;  // names of Features whose Mean Setting still follows L and U (C17)
 
   constructor(sequence) {
-    this.#sequence = structuredClone(sequence);
+    this.#doc = structuredClone(sequence);
     this.#autoMeans = new Set();
   }
 
-  // One Stage with one default Feature; Selling Price and costs 0.
+  // One Operation and its Inspection; Selling Price and costs 0.
   static blank() {
     const b = new Builder({ format_version: 1, name: "New sequence", selling_price: 0, stages: [],
                             means: { scheme: "per_feature", values: [] } });
-    b.addStage();
+    b.addOperation();
+    b.addInspection();
     return b;
   }
 
   // The sequence file the page downloads, and a Builder over an uploaded one. The server checks the rest.
-  download() { return `${JSON.stringify(this.#sequence, null, 2)}\n`; }
+  download() {
+    const { sequence } = this;
+    if (!sequence) throw new Error("Fix the warnings in the Sequence list first.");
+    return `${JSON.stringify(sequence, null, 2)}\n`;
+  }
 
   static upload(text) {
     let doc;
@@ -40,31 +55,81 @@ export class Builder {
     return new Builder(doc);
   }
 
-  get sequence() { return this.#sequence; }
+  // The sequence to Evaluate, Optimise or download, or null while the list has problems (C21).
+  get sequence() { return this.problems.length ? null : this.#doc; }
+
+  // The list's fields as they stand, valid or not, for the page to show. Read-only: edit through the methods.
+  get document() { return this.#doc; }
+
+  get revision() { return this.#revision; }
+
+  // The Sequence list (C19): each Stage's Operations, then the Inspection that closes it. An Operation can move up
+  // or down only within its Stage.
+  get rows() {
+    const { stages, means } = this.#doc;
+    return stages.flatMap((stage, i) => {
+      const n = stage.features.length;
+      const operations = stage.features.map((f, j) => ({
+        kind: "operation", stage: i, index: j, name: f.name, lower: f.lower, upper: f.upper,
+        mean: means.values[i]?.[f.name], canMoveUp: j > 0, canMoveDown: j < n - 1,
+      }));
+      if (this.#isOpen(i)) return operations;
+      const shape = n === 0 ? "no Operations" : n === 1 ? "Serial" : "Parallel";
+      return [...operations, { kind: "inspection", stage: i, label: `Inspection · Stage ${i + 1} · ${shape}` }];
+    });
+  }
+
+  // What makes the list not a valid Sequence (C21), each with the row its warning shows by.
+  get problems() {
+    const problems = [];
+    let row = 0;
+    this.#doc.stages.forEach((stage, i) => {
+      const n = stage.features.length;
+      if (this.#isOpen(i)) {
+        problems.push({ row, message: `Operations after the last Inspection: add an Inspection to close Stage ${i + 1}.` });
+        return;
+      }
+      row += n;  // the Inspection's row
+      if (n === 0) {
+        problems.push({ row, message: i === 0
+          ? "The list starts with an Inspection: Stage 1 has no Operations."
+          : `Two Inspections in a row: Stage ${i + 1} has no Operations.` });
+      } else if (n > MAX_OPERATIONS) {
+        problems.push({ row, message: `Stage ${i + 1} has ${n} Operations; a Stage can have at most ${MAX_OPERATIONS}.` });
+      }
+      if (i === MAX_INSPECTIONS) {
+        problems.push({ row, message: `A Sequence can have at most ${MAX_INSPECTIONS} Inspections.` });
+      }
+      row += 1;
+    });
+    if (row === 0 && !this.#open) problems.push({ row: 0, message: "The list is empty: add an Operation." });
+    return problems;
+  }
 
   // Preset-only settings are shown read-only (C10, C11): Mean Settings in another scheme, and a correlation matrix
   // or copula. While either applies, the Features they describe can't be added, removed or moved (C10, C11).
-  get meansEditable() { return this.#sequence.means.scheme === "per_feature"; }
+  get meansEditable() { return this.#doc.means.scheme === "per_feature"; }
 
   variationEditable(i) {
-    const v = this.#sequence.stages[i].variation;
+    const v = this.#doc.stages[i].variation;
     return v.type === "normal" && !Array.isArray(v.corr);
   }
 
   isAutoMean(name) { return this.#autoMeans.has(name); }
 
   // The earlier Stages' Processing Costs: the hint beside a cumulative Scrap Cost (C9).
-  earlierProcessing(i) { return this.#sequence.stages.slice(0, i).map((s) => s.costs.processing); }
+  earlierProcessing(i) { return this.#doc.stages.slice(0, i).map((s) => s.costs.processing); }
 
   // A full table can become the per-Feature shortcut only when it is additive, so nothing is lost (C8).
   canUseShortcut(i) {
-    const { costs } = this.#sequence.stages[i];
+    const { costs } = this.#doc.stages[i];
     return "rework_per_feature" in costs || isAdditive(costs);
   }
 
   // After Optimise or Undo (C16): new values, not an edit, so the reference stays.
   setMeans(means) {
-    this.#sequence = { ...this.#sequence, means: structuredClone(means) };
+    this.#doc = { ...this.#doc, means: structuredClone(means) };
+    this.#revision += 1;
     this.#autoMeans.clear();
   }
 
@@ -113,6 +178,15 @@ export class Builder {
 
   setProcessing(i, value) { this.#edit((seq) => { seq.stages[i].costs.processing = cost(value, "Processing Cost"); }); }
 
+  // `field` is per_stage or per_feature: an inspected part costs per_stage + per_feature × its Stage's Features.
+  setInspection(i, field, value) {
+    if (field !== "per_stage" && field !== "per_feature") throw new Error(`Unknown Inspection Cost ${field}.`);
+    this.#edit((seq) => {
+      seq.stages[i].inspection = { per_stage: 0, per_feature: 0, ...seq.stages[i].inspection,
+                                   [field]: cost(value, "Inspection Cost") };
+    });
+  }
+
   // `kind` is rework or scrap; `key` is a state key (full table) or a Feature name (per-Feature shortcut).
   setCost(i, kind, key, value) {
     this.#edit((seq) => {
@@ -142,125 +216,87 @@ export class Builder {
     });
   }
 
-  addFeature(i) {
+  // Appends an Operation (C20), named `name` if one is given, numbered if that is taken (`drill2`); otherwise the
+  // next unused `f1`, `f2`, … (C17). It stays after the last Inspection until an Inspection is added.
+  addOperation(name) {
+    this.#requireMeans();
+    const given = String(name ?? "").trim();
+    const chosen = given ? numberedName(this.#doc, checkName(given)) : nextName(this.#doc);
+    this.#edit((seq) => {
+      if (!this.#open) this.#pushStage(seq);
+      const i = seq.stages.length - 1;
+      const stage = seq.stages[i];
+      stage.features.push(newFeature(chosen));
+      stage.variation.sigmas.push(DEFAULT_FEATURE.sigma);
+      syncCosts(stage);
+      seq.means.values[i][chosen] = midpoint(DEFAULT_FEATURE);
+      this.#autoMeans.add(chosen);
+    }, true);
+  }
+
+  // Appends an Inspection, closing the Operations after the last one into a Stage; with none, the Stage is empty.
+  addInspection() {
+    this.#requireMeans();
+    this.#edit((seq) => { if (!this.#open) this.#pushStage(seq); }, false);
+  }
+
+  // Deleting a Stage's only Operation leaves its Inspection, which `problems` then reports.
+  deleteOperation(i, j) {
+    this.#requireStructure(i);
+    const closesOpen = this.#isOpen(i) && this.#doc.stages[i].features.length === 1;
+    this.#edit((seq) => {
+      this.#takeFeature(seq, i, j);
+      if (closesOpen) {
+        seq.stages.pop();
+        seq.means.values.pop();
+      }
+    }, this.#open && !closesOpen);
+  }
+
+  // Up (-1) or down (+1) within the Stage.
+  moveOperation(i, j, delta) {
+    const target = j + delta;
+    if (target < 0 || target >= this.#doc.stages[i].features.length) {
+      throw new Error("An Operation can't be moved past an Inspection.");
+    }
     this.#requireStructure(i);
     this.#edit((seq) => {
       const stage = seq.stages[i];
-      const name = nextName(seq);
-      stage.features.push(newFeature(name));
-      stage.variation.sigmas.push(DEFAULT_FEATURE.sigma);
-      syncCosts(stage);
-      seq.means.values[i][name] = midpoint(DEFAULT_FEATURE);
-      this.#autoMeans.add(name);
+      for (const list of [stage.features, stage.variation.sigmas]) [list[j], list[target]] = [list[target], list[j]];
+      syncCosts(stage);  // state keys in the new Feature order (C7)
+      orderMeans(seq, i);
     });
   }
 
-  addStage() {
-    this.#requireMeans();
-    this.#edit((seq) => {
-      const name = nextName(seq);
-      seq.stages.push({
-        features: [newFeature(name)],
-        variation: { type: "normal", sigmas: [DEFAULT_FEATURE.sigma], corr: 0 },
-        costs: { processing: 0, rework_per_feature: { [name]: 0 }, scrap_per_feature: { [name]: 0 } },
-        inspection: { per_stage: 0, per_feature: 0 },
-      });
-      seq.means.values.push({ [name]: midpoint(DEFAULT_FEATURE) });
-      this.#autoMeans.add(name);
+  #isOpen(i) { return this.#open && i === this.#doc.stages.length - 1; }
+
+  #pushStage(seq) {
+    seq.stages.push({
+      features: [],
+      variation: { type: "normal", sigmas: [], corr: 0 },
+      costs: { processing: 0, rework_per_feature: {}, scrap_per_feature: {} },
+      inspection: { per_stage: 0, per_feature: 0 },
     });
+    seq.means.values.push({});
   }
 
-  deleteFeature(i, j) {
-    this.#requireStructure(i);
-    if (this.#sequence.stages[i].features.length === 1) {
-      throw new Error("A Stage needs at least one Feature: delete the Stage instead.");
-    }
-    this.#edit((seq) => { this.#takeFeature(seq, i, j); });
-  }
-
-  // Up (-1) or down (+1) within the Stage; past either end, into the neighbouring Stage.
-  moveFeature(i, j, delta) {
-    const { stages } = this.#sequence;
-    const n = stages[i].features.length;
-    const target = j + delta;
-    if (target >= 0 && target < n) {
-      this.#requireStructure(i);
-      this.#edit((seq) => {
-        const stage = seq.stages[i];
-        for (const list of [stage.features, stage.variation.sigmas]) [list[j], list[target]] = [list[target], list[j]];
-        syncCosts(stage);  // state keys in the new Feature order (C7)
-        orderMeans(seq, i);
-      });
-      return;
-    }
-    const to = i + delta;
-    if (to < 0 || to >= stages.length) throw new Error("There is no Stage to move this Feature into.");
-    if (n === 1) throw new Error("A Stage needs at least one Feature: move the Stage, or delete it, instead.");
-    this.#requireStructure(i);
-    this.#requireStructure(to);
-    this.#edit((seq) => {
-      const moved = this.#takeFeature(seq, i, j);
-      const stage = seq.stages[to];
-      const at = delta < 0 ? stage.features.length : 0;
-      stage.features.splice(at, 0, moved.feature);
-      stage.variation.sigmas.splice(at, 0, moved.sigma);
-      const { costs } = stage;
-      if ("rework_per_feature" in costs) {
-        costs.scrap_per_feature[moved.feature.name] = moved.scrap;
-        if (moved.rework !== undefined) costs.rework_per_feature[moved.feature.name] = moved.rework;
-      } else if (moved.rework !== undefined) {
-        costs.rework[moved.feature.name] = moved.rework;  // full table: the moved Feature's own Rework State
-      }
-      syncCosts(stage);
-      seq.means.values[to][moved.feature.name] = moved.mean;
-      orderMeans(seq, to);
-    });
-  }
-
-  deleteStage(i) {
-    this.#requireMeans();
-    if (this.#sequence.stages.length === 1) throw new Error("A Sequence needs at least one Stage.");
-    this.#edit((seq) => {
-      for (const f of seq.stages[i].features) this.#autoMeans.delete(f.name);
-      seq.stages.splice(i, 1);
-      seq.means.values.splice(i, 1);
-    });
-  }
-
-  moveStage(i, delta) {
-    this.#requireMeans();
-    const to = i + delta;
-    if (to < 0 || to >= this.#sequence.stages.length) throw new Error("There is no Stage to swap with.");
-    this.#edit((seq) => {
-      for (const list of [seq.stages, seq.means.values]) [list[i], list[to]] = [list[to], list[i]];
-    });
-  }
-
-  // Removes Feature j from Stage i, with everything the sequence held for it, and returns that.
+  // Removes Feature j from Stage i, with its sigma, costs and Mean Setting.
   #takeFeature(seq, i, j) {
     const stage = seq.stages[i];
     const [feature] = stage.features.splice(j, 1);
-    const [sigma] = stage.variation.sigmas.splice(j, 1);
-    const { costs } = stage;
-    const shortcut = "rework_per_feature" in costs;
-    const rework = shortcut ? costs.rework_per_feature[feature.name] : costs.rework[feature.name];
-    const scrap = shortcut ? costs.scrap_per_feature[feature.name] : 0;
+    stage.variation.sigmas.splice(j, 1);
     syncCosts(stage);
-    const mean = seq.means.values[i][feature.name];
     delete seq.means.values[i][feature.name];
-    return { feature, sigma, rework, scrap, mean };
+    this.#autoMeans.delete(feature.name);
   }
 
   #rename(i, j, value) {
     this.#requireMeans();
     const name = String(value).trim();
-    const old = this.#sequence.stages[i].features[j].name;
+    const old = this.#doc.stages[i].features[j].name;
     if (name === old) return;
-    if (!FEATURE_NAME.test(name)) throw new Error(`Feature names are 1 to 16 letters, digits or underscores, not "${name}".`);
-    if (name === INITIAL) throw new Error(`"${INITIAL}" is reserved for the Initial State.`);
-    if (this.#sequence.stages.some((s) => s.features.some((f) => f.name === name))) {
-      throw new Error(`There is already a Feature called ${name}.`);
-    }
+    checkName(name);
+    if (usedNames(this.#doc).has(name)) throw new Error(`There is already a Feature called ${name}.`);
     this.#edit((seq) => {
       const stage = seq.stages[i];
       stage.features[j].name = name;
@@ -276,7 +312,7 @@ export class Builder {
 
   #requireMeans() {
     if (!this.meansEditable) {
-      throw new Error(`These Mean Settings use the ${this.#sequence.means.scheme} scheme, so they are read-only here.`);
+      throw new Error(`These Mean Settings use the ${this.#doc.means.scheme} scheme, so they are read-only here.`);
     }
   }
 
@@ -292,13 +328,15 @@ export class Builder {
     if (!this.variationEditable(i)) throw new Error(`Stage ${i + 1}'s Process Variation is read-only here.`);
   }
 
-  // Applies `change` to a copy, which becomes the sequence. An edited preset is no longer the thesis case, so its
-  // reference goes.
-  #edit(change) {
-    const seq = structuredClone(this.#sequence);
+  // Applies `change` to a copy, which becomes the list, with `open` saying whether its last Stage is now open. An
+  // edited preset is no longer the thesis case, so its reference goes.
+  #edit(change, open = this.#open) {
+    const seq = structuredClone(this.#doc);
     change(seq);
     delete seq.reference;
-    this.#sequence = seq;
+    this.#doc = seq;
+    this.#open = open;
+    this.#revision += 1;
   }
 }
 
@@ -307,8 +345,24 @@ function newFeature(name) {
   return { name, lower, upper, rework_side };
 }
 
+const usedNames = (seq) => new Set(seq.stages.flatMap((s) => s.features.map((f) => f.name)));
+
+function checkName(name) {
+  if (!FEATURE_NAME.test(name)) throw new Error(`Feature names are 1 to 16 letters, digits or underscores, not "${name}".`);
+  if (name === INITIAL) throw new Error(`"${INITIAL}" is reserved for the Initial State.`);
+  return name;
+}
+
+// `name`, or if that is taken `name2`, `name3`, … (C20).
+function numberedName(seq, name) {
+  const used = usedNames(seq);
+  let candidate = name;
+  for (let k = 2; used.has(candidate); k += 1) candidate = `${name}${k}`;
+  return checkName(candidate);
+}
+
 function nextName(seq) {
-  const used = new Set(seq.stages.flatMap((s) => s.features.map((f) => f.name)));
+  const used = usedNames(seq);
   let k = 1;
   while (used.has(`f${k}`)) k += 1;
   return `f${k}`;

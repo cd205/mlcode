@@ -52,21 +52,22 @@ button.secondary { padding: 4px 12px; }
 button.icon { padding: 2px 7px; background: var(--bg); color: var(--ink); border: 1px solid var(--grid); }
 button.icon:disabled, button.secondary:disabled { cursor: default; opacity: 0.35; }
 
-/* The editor: compact inputs in tables, one card per Stage. */
-.stage { background: var(--bg); border: 1px solid var(--grid); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; }
-.stage-head { display: flex; align-items: center; gap: 4px; }
-.stage-head h3 { margin: 0 auto 0 0; font-size: 0.95rem; }
-.stage .actions { margin: 6px 0 10px; }
+/* The Sequence list (§7.1): one row per Operation or Inspection, its editor opening below it. */
+.seq-list { list-style: none; margin: 0 0 8px; padding: 0; }
+.seq-list .row { background: var(--bg); border: 1px solid var(--grid); border-radius: 6px; margin-bottom: 4px; }
+.seq-list .row.inspection { border-left: 4px solid var(--ink); }
+.row-head { display: flex; align-items: center; gap: 4px; padding: 2px 6px 2px 0; }
+.row-summary { flex: 1; text-align: left; background: none; color: var(--ink); padding: 6px 10px; }
+.row.inspection .row-summary { font-weight: 600; }
+.row.open .row-summary { background: var(--panel); }
+.row-editor { padding: 8px 10px; border-top: 1px solid var(--grid); font-size: 0.9rem; }
+.row-editor input { width: 90px; }
+.row-editor table { font-size: 0.85rem; }
+.row-editor th, .row-editor td { padding: 3px 4px; }
+.row-editor td input { margin: 0; padding: 3px 4px; }
+.seq-list .warning { background: var(--error-bg); border: 1px solid var(--scrap); border-radius: 6px; padding: 4px 10px; margin-bottom: 4px; font-size: 0.85rem; }
+.add-row input.name { width: 140px; margin: 0; }
 .scroll { overflow-x: auto; }
-.stage table { font-size: 0.85rem; }
-.stage th, .stage td { padding: 3px 4px; }
-.stage td input, .stage td select { margin: 0; padding: 3px 4px; }
-.features th, .features td { padding: 3px 2px; }
-.features td input { width: 46px; }
-.features td input.name { width: 56px; }
-.features td input.mean { width: 74px; }
-.features td select { width: 66px; }
-.features button.icon { padding: 1px 5px; }
 #sequence-editor > .actions { margin-bottom: 16px; }
 .row-actions { display: flex; gap: 2px; }
 input.auto { font-style: italic; color: var(--muted); }

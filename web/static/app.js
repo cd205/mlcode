@@ -1,12 +1,14 @@
 // The page (web_app_plan.md §7): build a sequence or start from a preset, Evaluate it or Optimise its Mean Settings
 // on the server, draw the diagram and the results table.
 
-import { Builder, REWORK_SIDES } from "./builder.js";
+import { Builder, OPERATION_NAMES, REWORK_SIDES } from "./builder.js";
 import { attachTooltip, drawDiagram, fmtProb } from "./diagram.js";
 
 const $ = (id) => document.getElementById(id);
 let builder = null;
 let undoMeans = null;  // the means before the last Optimise: one undo slot (C16)
+let selected = null;  // the row whose editor is open: "op:<name>" or "insp:<Stage index>" (§7.1)
+let busy = false;  // a request is in flight
 
 // Calls the API; a failed call throws an Error carrying the server's readable message (C18).
 async function api(path, options) {
@@ -41,8 +43,8 @@ function row(table, label, value, cls = "num", sub = false) {
 const money = (x) => x.toFixed(2);
 const fmtMean = (x) => String(Number(x.toFixed(4)));  // optimised means are unrounded; round for display only (C12)
 
-// The editor (§7 left panel). Typed values go through `bind`, so an edit only refreshes values and keeps the
-// focus; changes to the shape of the Stages, Features or cost tables redraw the panel.
+// The editor (§7.1 left panel). Typed values go through `bind`, so an edit only refreshes values and keeps the
+// focus; changes to the shape of the list or the cost tables redraw the panel.
 let bindings = [];
 
 function el(tag, props = {}, ...children) {
@@ -79,10 +81,10 @@ const iconButton = (label, title, onClick, disabled) => editButton(label, title,
 
 function edit(change, redraw) {
   showError(null);
-  const before = builder.sequence;
+  const before = builder.revision;
   try {
     change();
-    if (builder.sequence !== before) {  // e.g. renaming a Feature to its own name changes nothing
+    if (builder.revision !== before) {  // e.g. renaming a Feature to its own name changes nothing
       setUndo(null);  // the undo slot is for the last Optimise only (C16)
       $("outputs").classList.add("stale");
     }
@@ -94,103 +96,150 @@ function edit(change, redraw) {
 
 function refresh() {
   for (const update of bindings) update();
+  updateActions();
+}
+
+// Evaluate, Optimise and Download need a valid Sequence list (C21).
+function updateActions() {
+  const invalid = !builder?.sequence;
+  for (const id of ["evaluate", "optimise", "undo"]) $(id).disabled = busy || invalid;
+  $("download").disabled = invalid;
+  const title = invalid ? "Fix the warnings in the Sequence list first" : "";
+  for (const id of ["evaluate", "optimise", "download"]) $(id).title = title;
 }
 
 function renderEditor() {
   bindings = [];
   const b = builder;
-  const seq = b.sequence;
+  const doc = () => b.document;
   const wrap = $("sequence-editor");
   wrap.replaceChildren(
-    el("label", {}, "Name", bind(el("input", { type: "text" }), () => b.sequence.name ?? "", (v) => b.setName(v))),
-    el("label", {}, "Selling Price", numberInput(() => b.sequence.selling_price, (v) => b.setSellingPrice(v))),
+    el("label", {}, "Name", bind(el("input", { type: "text" }), () => doc().name ?? "", (v) => b.setName(v))),
+    el("label", {}, "Selling Price", numberInput(() => doc().selling_price, (v) => b.setSellingPrice(v))),
   );
   if (!b.meansEditable) {
-    wrap.append(el("p", { className: "muted" }, `Mean Settings use the ${seq.means.scheme} scheme and are read-only ` +
-      "here; Optimise still works. Stages and Features can't be added, removed or moved."));
+    wrap.append(el("p", { className: "muted" }, `Mean Settings use the ${doc().means.scheme} scheme and are ` +
+      "read-only here; Optimise still works. Operations and Inspections can't be added, removed or moved."));
   }
-  seq.stages.forEach((_, i) => wrap.append(stageEditor(i)));
-  wrap.append(el("div", { className: "actions" },
-    editButton("Add Stage", "Add a Stage at the end", () => b.addStage(), !b.meansEditable)));
+  const problems = b.problems;
+  const list = el("ol", { className: "seq-list" });
+  b.rows.forEach((r, k) => {
+    list.append(r.kind === "operation" ? operationRow(r) : inspectionRow(r));
+    for (const p of problems.filter((p) => p.row === k)) {
+      list.append(el("li", { className: "warning", role: "status" }, p.message));
+    }
+  });
+  const name = el("input", { type: "text", className: "name", maxLength: 16, placeholder: "name (optional)" });
+  name.setAttribute("list", "operation-names");
+  name.setAttribute("aria-label", "New Operation's name");
+  wrap.append(list, el("datalist", { id: "operation-names" }, ...OPERATION_NAMES.map((n) => new Option(n))),
+    el("div", { className: "actions add-row" }, name,
+      editButton("Add Operation", "Add an Operation at the end", () => {
+        b.addOperation(name.value);
+        selected = `op:${b.rows.at(-1).name}`;
+      }, !b.meansEditable),
+      editButton("Add Inspection", "Add an Inspection at the end", () => b.addInspection(), !b.meansEditable)));
   refresh();
 }
 
-function stageEditor(i) {
-  const b = builder;
-  const stage = b.sequence.stages[i];
-  const n = b.sequence.stages.length;
-  const structure = b.meansEditable && b.variationEditable(i);
-  const card = el("section", { className: "stage" });
-  card.append(el("div", { className: "stage-head" }, el("h3", {}, `Stage ${i + 1}`),
-    iconButton("↑", `Move Stage ${i + 1} up`, () => b.moveStage(i, -1), !b.meansEditable || i === 0),
-    iconButton("↓", `Move Stage ${i + 1} down`, () => b.moveStage(i, +1), !b.meansEditable || i === n - 1),
-    iconButton("✕", `Delete Stage ${i + 1}`, () => b.deleteStage(i), !b.meansEditable || n === 1)));
-
-  const table = el("table", { className: "features" });
-  table.createTHead().innerHTML = "<tr><th>Feature</th><th>L</th><th>U</th><th>Rework Side</th><th>σ</th>" +
-    "<th>Mean Setting</th><th></th></tr>";
-  const body = table.createTBody();
-  stage.features.forEach((f, j) => {
-    const name = f.name;
-    const feature = () => b.sequence.stages[i].features[j];
-    const tr = body.insertRow();
-    const cell = (child) => tr.insertCell().append(child);
-    cell(b.meansEditable
-      ? bind(el("input", { type: "text", className: "name", maxLength: 16 }), () => name,
-        (v) => b.setFeature(i, j, "name", v), { redraw: true })
-      : name);
-    cell(numberInput(() => feature().lower, (v) => b.setFeature(i, j, "lower", v)));
-    cell(numberInput(() => feature().upper, (v) => b.setFeature(i, j, "upper", v)));
-    const side = el("select", { disabled: !b.meansEditable }, ...REWORK_SIDES.map((s) => new Option(s, s)));
-    cell(bind(side, () => feature().rework_side, (v) => b.setFeature(i, j, "rework_side", v), { redraw: true }));
-    cell(b.variationEditable(i)
-      ? numberInput(() => b.sequence.stages[i].variation.sigmas[j], (v) => b.setSigma(i, j, v))
-      : String(stage.variation.sigmas?.[j] ?? "–"));
-    if (b.meansEditable) {
-      const mean = numberInput(() => fmtMean(b.sequence.means.values[i][name]), (v) => b.setMean(i, name, v), "mean");
-      bindings.push(() => {
-        mean.classList.toggle("auto", b.isAutoMean(name));
-        mean.title = b.isAutoMean(name) ? "Midway between L and U until you type a mean" : "";
-      });
-      cell(mean);
-    } else {
-      const mu = b.sequence.means.values[i]?.[name];
-      cell(typeof mu === "number" ? fmtMean(mu) : "read-only");
-    }
-    const last = j === stage.features.length - 1;
-    cell(el("span", { className: "row-actions" },
-      iconButton("↑", `Move ${name} up`, () => b.moveFeature(i, j, -1), !structure || (i === 0 && j === 0)),
-      iconButton("↓", `Move ${name} down`, () => b.moveFeature(i, j, +1), !structure || (i === n - 1 && last)),
-      iconButton("✕", `Delete ${name}`, () => b.deleteFeature(i, j), !structure || stage.features.length === 1)));
+// A row of the list; clicking its summary opens its editor below it and closes any other (§7.1).
+function listRow(key, className, summary, buttons, editor) {
+  const open = selected === key;
+  const head = el("button", { type: "button", className: "row-summary" }, summary);
+  head.setAttribute("aria-expanded", String(open));
+  head.addEventListener("click", () => {
+    selected = open ? null : key;
+    renderEditor();
   });
-  card.append(el("div", { className: "scroll" }, table),
-    el("div", { className: "actions" },
-      editButton("Add Feature", `Add a Feature to Stage ${i + 1}`, () => b.addFeature(i), !structure)));
+  const item = el("li", { className: `row ${className}${open ? " open" : ""}` },
+    el("div", { className: "row-head" }, head, el("span", { className: "row-actions" }, ...buttons)));
+  if (open) item.append(editor());
+  return item;
+}
 
-  const corr = stage.variation.corr ?? 0;
-  card.append(b.variationEditable(i)
-    ? el("label", { className: "inline" }, "Correlation",
-      numberInput(() => b.sequence.stages[i].variation.corr ?? 0, (v) => b.setCorr(i, v)))
-    : el("p", { className: "muted" }, `Process Variation: ${stage.variation.type}` +
-      (Array.isArray(corr) ? ", correlation matrix" : `, correlation ${corr}`) + " (preset-only, read-only)"));
-  const { per_stage: perStage = 0, per_feature: perFeature = 0 } = stage.inspection ?? {};
-  if (perStage || perFeature) {
-    card.append(el("p", { className: "muted" },
-      `Inspection Cost ${perStage} + ${perFeature} per Feature, per part (preset-only, read-only)`));
+function operationRow(r) {
+  const b = builder;
+  const { stage: i, index: j, name } = r;
+  const structure = b.meansEditable && b.variationEditable(i);
+  const summary = live(el("span"), () => {
+    const f = b.document.stages[i].features[j];
+    const mu = b.document.means.values[i]?.[f.name];
+    return `${f.name} · ${f.lower}–${f.upper} · μ ${typeof mu === "number" ? fmtMean(mu) : "–"}`;
+  });
+  return listRow(`op:${name}`, "operation", summary, [
+    iconButton("↑", `Move ${name} up`, () => b.moveOperation(i, j, -1), !structure || !r.canMoveUp),
+    iconButton("↓", `Move ${name} down`, () => b.moveOperation(i, j, +1), !structure || !r.canMoveDown),
+    iconButton("✕", `Delete ${name}`, () => b.deleteOperation(i, j), !structure),
+  ], () => operationEditor(i, j, name));
+}
+
+function operationEditor(i, j, name) {
+  const b = builder;
+  const feature = () => b.document.stages[i].features[j];
+  const box = el("div", { className: "row-editor" });
+  const field = (label, child) => box.append(el("label", { className: "inline" }, label, child));
+  if (b.meansEditable) {
+    const input = el("input", { type: "text", className: "name", maxLength: 16 });
+    input.setAttribute("list", "operation-names");
+    field("Name", bind(input, () => name, (v) => {
+      b.setFeature(i, j, "name", v);
+      selected = `op:${feature().name}`;
+    }, { redraw: true }));
   }
-  card.append(costEditor(i));
-  return card;
+  field("L", numberInput(() => feature().lower, (v) => b.setFeature(i, j, "lower", v)));
+  field("U", numberInput(() => feature().upper, (v) => b.setFeature(i, j, "upper", v)));
+  const side = el("select", { disabled: !b.meansEditable }, ...REWORK_SIDES.map((s) => new Option(s, s)));
+  field("Rework Side", bind(side, () => feature().rework_side, (v) => b.setFeature(i, j, "rework_side", v),
+    { redraw: true }));
+  const sigmas = () => b.document.stages[i].variation.sigmas;
+  if (b.variationEditable(i)) field("σ", numberInput(() => sigmas()[j], (v) => b.setSigma(i, j, v)));
+  else box.append(el("p", { className: "muted" }, `σ ${sigmas()?.[j] ?? "–"} (preset-only, read-only)`));
+  const mu = () => b.document.means.values[i]?.[name];
+  if (b.meansEditable) {
+    const mean = numberInput(() => fmtMean(mu()), (v) => b.setMean(i, name, v), "mean");
+    bindings.push(() => {
+      mean.classList.toggle("auto", b.isAutoMean(name));
+      mean.title = b.isAutoMean(name) ? "Midway between L and U until you type a mean" : "";
+    });
+    field("Mean Setting", mean);
+  } else {
+    box.append(el("p", { className: "muted" },
+      `Mean Setting ${typeof mu() === "number" ? fmtMean(mu()) : "read-only"} (${b.document.means.scheme} scheme)`));
+  }
+  return box;
+}
+
+function inspectionRow(r) {
+  return listRow(`insp:${r.stage}`, "inspection", r.label, [], () => inspectionEditor(r.stage));
+}
+
+function inspectionEditor(i) {
+  const b = builder;
+  const stage = () => b.document.stages[i];
+  const box = el("div", { className: "row-editor" });
+  const corr = stage().variation.corr ?? 0;
+  box.append(b.variationEditable(i)
+    ? el("label", { className: "inline" }, "Correlation",
+      numberInput(() => stage().variation.corr ?? 0, (v) => b.setCorr(i, v)))
+    : el("p", { className: "muted" }, `Process Variation: ${stage().variation.type}` +
+      (Array.isArray(corr) ? ", correlation matrix" : `, correlation ${corr}`) + " (preset-only, read-only)"));
+  box.append(el("label", { className: "inline" }, "Inspection Cost",
+    numberInput(() => stage().inspection?.per_stage ?? 0, (v) => b.setInspection(i, "per_stage", v)),
+    "+", numberInput(() => stage().inspection?.per_feature ?? 0, (v) => b.setInspection(i, "per_feature", v)),
+    "per Feature"));
+  box.append(costEditor(i));
+  return box;
 }
 
 // One row per Feature (shortcut) or per state (full table), C8. Scrap Cost is cumulative and never summed for the
 // user; the earlier Stages' Processing Costs are shown beside it as a hint (C9).
 function costEditor(i) {
   const b = builder;
-  const { costs } = b.sequence.stages[i];
+  const { costs } = b.document.stages[i];
   const shortcut = "rework_per_feature" in costs;
   const wrap = el("div", { className: "costs" });
-  wrap.append(el("label", { className: "inline" }, "Processing Cost",
-    numberInput(() => b.sequence.stages[i].costs.processing, (v) => b.setProcessing(i, v))));
+  wrap.append(el("label", { className: "inline" }, "Processing Cost (this Stage)",
+    numberInput(() => b.document.stages[i].costs.processing, (v) => b.setProcessing(i, v))));
   const mode = el("select", {}, new Option("per Feature", "shortcut"), new Option("full table, by state", "full"));
   if (!b.canUseShortcut(i)) {
     mode.options[0].disabled = true;
@@ -208,9 +257,9 @@ function costEditor(i) {
     const tr = body.insertRow();
     tr.insertCell().textContent = key;
     tr.insertCell().append(key in costs[reworkTable]
-      ? numberInput(() => b.sequence.stages[i].costs[reworkTable][key], (v) => b.setCost(i, "rework", key, v))
+      ? numberInput(() => b.document.stages[i].costs[reworkTable][key], (v) => b.setCost(i, "rework", key, v))
       : "–");
-    tr.insertCell().append(numberInput(() => b.sequence.stages[i].costs[scrapTable][key],
+    tr.insertCell().append(numberInput(() => b.document.stages[i].costs[scrapTable][key],
       (v) => b.setCost(i, "scrap", key, v)));
   }
   wrap.append(el("div", { className: "scroll" }, table));
@@ -271,6 +320,7 @@ function setUndo(means) {
 function showBuilder(next) {
   const previous = builder;
   builder = next;
+  selected = null;
   try {
     renderEditor();
   } catch {
@@ -298,6 +348,7 @@ function openOwn(next) {
 }
 
 function download() {
+  if (!builder?.sequence) return;
   const blob = new Blob([builder.download()], { type: "application/json" });
   const slug = (builder.sequence.name ?? "").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   const link = el("a", { href: URL.createObjectURL(blob), download: `${slug || "sequence"}.json`, hidden: true });
@@ -317,14 +368,14 @@ async function upload(file) {
   }
 }
 
-const BUTTONS = ["evaluate", "optimise", "undo"];
-
 // Evaluate, or Optimise and replace the sequence's means with the optimum (C16).
 async function submit(action) {
-  const submitted = builder?.sequence;  // the sequence may change while the request is in flight
+  const submitted = builder?.sequence;  // null while the list has problems (C21)
   if (!submitted) return;
+  const revision = builder.revision;  // the list may change while the request is in flight
   showError(null);
-  for (const id of BUTTONS) $(id).disabled = true;
+  busy = true;
+  updateActions();
   try {
     const body = { sequence: submitted, n_parts: Number($("n-parts").value) };
     if (action === "optimise") body.objective = $("objective").value;
@@ -333,7 +384,7 @@ async function submit(action) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (builder.sequence !== submitted) return;
+    if (builder.revision !== revision) return;
     if (action === "optimise") {
       builder.setMeans(results.means);
       setUndo(submitted.means);
@@ -345,7 +396,8 @@ async function submit(action) {
   } catch (e) {
     showError(e.message);
   } finally {
-    for (const id of BUTTONS) $(id).disabled = false;
+    busy = false;
+    updateActions();
   }
 }
 
