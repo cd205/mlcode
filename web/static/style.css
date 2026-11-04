@@ -10,7 +10,6 @@
   --bg: #ffffff;
   --panel: #f6f8fa;
   --error-bg: #fff1ec;
-  --check: #d4a72c;  /* amber: a Scrap Cost to check (C25) */
 }
 
 * { box-sizing: border-box; }
@@ -72,10 +71,7 @@ button.icon:disabled, button.secondary:disabled { cursor: default; opacity: 0.35
 #sequence-editor > .actions { margin-bottom: 16px; }
 .row-actions { display: flex; gap: 2px; }
 input.auto { font-style: italic; color: var(--muted); }
-/* C25: a Scrap Cost to check after earlier Processing Costs changed. */
-input.check { border-color: var(--check); box-shadow: 0 0 0 1px var(--check); }
-.scrap-cell { display: inline-flex; align-items: center; gap: 4px; }
-.check-marker { color: var(--check); font-size: 0.75rem; font-weight: 600; }
+label .hint { display: block; font-weight: 400; font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
 label.inline { display: flex; align-items: center; gap: 8px; font-weight: 400; margin-bottom: 6px; }
 label.inline input, label.inline select { width: auto; flex: 1; margin: 0; }
 .costs { border-top: 1px solid var(--grid); margin-top: 8px; padding-top: 8px; }

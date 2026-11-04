@@ -16,7 +16,9 @@ class CostTable:
     """Processing Cost, a Rework Cost per Rework State, and a Scrap Cost per transient state.
 
     States are keyed by the frozenset of reworked Feature names; the Initial State is frozenset().
-    Scrap Costs are cumulative (A6): they already include value added in earlier Stages.
+    A Scrap Cost is charged on top of what the part has already been charged. The thesis cases make it cumulative
+    (A6); the web app makes it the extra cost of scrapping, which may be negative for material recovered (ADR
+    0006), so it only needs to be finite here; Sequence bounds it by the Material Value.
     Which keys are required depends on the Stage, so Stage checks them.
     """
 
@@ -26,11 +28,16 @@ class CostTable:
 
     def __post_init__(self) -> None:
         _check_cost("processing", self.processing)
-        for label in ("rework", "scrap"):
+        for label, check in (("rework", _check_cost), ("scrap", _check_finite)):
             table = {frozenset(k): float(v) for k, v in getattr(self, label).items()}
             for state, value in table.items():
-                _check_cost(f"{label} {sorted(state)}", value)
+                check(f"{label} {sorted(state)}", value)
             object.__setattr__(self, label, MappingProxyType(table))
+
+    @property
+    def lowest_scrap(self) -> float:
+        """The lowest Scrap Cost over the states, which Sequence bounds by minus the Material Value."""
+        return min(self.scrap.values())
 
     @classmethod
     def additive(
@@ -68,6 +75,11 @@ class InspectionCost:
 
     def for_features(self, n_features: int) -> float:
         return self.per_stage + self.per_feature * n_features
+
+
+def _check_finite(label: str, value: float) -> None:
+    if not math.isfinite(value):
+        raise ValueError(f"{label} cost must be finite, got {value!r}")
 
 
 def _check_cost(label: str, value: float) -> None:

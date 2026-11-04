@@ -65,17 +65,20 @@ class LoadedSequence:
 def load_sequence(data: object) -> LoadedSequence:
     """Parse sequence JSON (already decoded) into `oms` objects."""
     doc = _object(data, "sequence", required={"format_version", "selling_price", "stages", "means"},
-                  optional={"name", "reference"})
+                  optional={"name", "reference", "material_value"})
     if doc["format_version"] != FORMAT_VERSION:
         raise ValueError(f"format_version: only version {FORMAT_VERSION} is supported, got {doc['format_version']!r}")
     stages_data = _list(doc["stages"], "stages")
     if not stages_data:
         raise ValueError("stages: a Sequence needs at least one Stage")
-    loaded_stages = [_load_stage(s, f"stages[{i}]") for i, s in enumerate(stages_data)]
+    material_value = _cost(doc.get("material_value", 0), "material_value")
+    scrap_floor = -material_value or 0.0  # a Scrap Cost may recover the material, no more (C28); `or`: not -0.0
+    loaded_stages = [_load_stage(s, f"stages[{i}]", scrap_floor) for i, s in enumerate(stages_data)]
     stages = tuple(stage for stage, _ in loaded_stages)
     feature_processing = tuple(processing for _, processing in loaded_stages)
     selling_price = _cost(doc["selling_price"], "selling_price")
-    sequence = _at_path(lambda: Sequence(stages=stages, selling_price=selling_price), "stages")
+    sequence = _at_path(lambda: Sequence(stages=stages, selling_price=selling_price, material_value=material_value),
+                        "stages")
     feature_means = _load_means(doc["means"], stages)
     reference = _load_reference(doc["reference"], "reference") if "reference" in doc else None
     name = _string(doc.get("name", ""), "name")
@@ -90,6 +93,8 @@ def dump_sequence(loaded: LoadedSequence) -> Json:
                  "stages": [_dump_stage(stage, loaded.stage_feature_processing(i))
                             for i, stage in enumerate(loaded.sequence.stages)],
                  "means": dump_means(loaded)}
+    if loaded.sequence.material_value:
+        doc["material_value"] = loaded.sequence.material_value
     if loaded.reference is not None:
         doc["reference"] = dump_reference(loaded.reference)
     return doc
@@ -117,7 +122,7 @@ def state_key(state: State, feature_names: tuple[str, ...]) -> str:
     return "+".join(n for n in feature_names if n in state)
 
 
-def _load_stage(data: object, path: str) -> tuple[Stage, dict[str, float] | None]:
+def _load_stage(data: object, path: str, scrap_floor: float) -> tuple[Stage, dict[str, float] | None]:
     """The Stage, and its Features' Processing Costs when they carry them (C22)."""
     doc = _object(data, path, required={"features", "variation", "costs"}, optional={"inspection"})
     features_data = _list(doc["features"], f"{path}.features")
@@ -128,7 +133,7 @@ def _load_stage(data: object, path: str) -> tuple[Stage, dict[str, float] | None
         raise ValueError(f"{path}: Feature names must be unique within a Stage, got {list(names)}")
     variation = _load_variation(doc["variation"], f"{path}.variation", len(features))
     processing = _feature_processing(loaded_features, path)
-    costs = _load_costs(doc["costs"], f"{path}.costs", features, processing)
+    costs = _load_costs(doc["costs"], f"{path}.costs", features, processing, scrap_floor)
     inspection = _load_inspection(doc.get("inspection", {}), f"{path}.inspection")
     stage = _at_path(lambda: Stage(features=features, variation=variation, costs=costs, inspection=inspection), path)
     return stage, processing
@@ -178,10 +183,11 @@ def _load_variation(data: object, path: str, n_features: int) -> MultivariateNor
 
 
 def _load_costs(data: object, path: str, features: tuple[Feature, ...],
-                feature_processing: dict[str, float] | None) -> CostTable:
+                feature_processing: dict[str, float] | None, scrap_floor: float) -> CostTable:
     """Full state tables, or the per-Feature shortcut for `CostTable.additive` (C8), never both.
 
     With `feature_processing`, `processing` may be omitted and the Stage's Processing Cost is their sum (C22).
+    A scrapped part's Scrap Cost may be negative down to `scrap_floor`, minus the material_value (C28).
     """
     names = tuple(f.name for f in features)
     states = enumerate_states(features)
@@ -198,14 +204,19 @@ def _load_costs(data: object, path: str, features: tuple[Feature, ...],
         reworkable = [f.name for f in features if f.reworkable]
         rework = _per_feature(doc["rework_per_feature"], f"{path}.rework_per_feature", reworkable,
                               "the reworkable Features")
-        scrap = _per_feature(doc["scrap_per_feature"], f"{path}.scrap_per_feature", list(names))
+        scrap = _per_feature(doc["scrap_per_feature"], f"{path}.scrap_per_feature", list(names), parse=_number)
+        total = math.fsum(scrap.values())
+        if total < scrap_floor:
+            raise ValueError(f"{path}.scrap_per_feature: a scrapped part costs their sum, {total!r}, which must be "
+                             f"at least minus the material_value, {scrap_floor!r}")
         processing = _stage_processing(doc, path, feature_processing)
         return _at_path(lambda: CostTable.additive(processing, rework, scrap), path)
     doc = _object(data, path, required=required | set(FULL_COSTS), optional=optional)
     processing = _stage_processing(doc, path, feature_processing)
     return _at_path(lambda: CostTable(processing=processing,
                                    rework=_state_table(doc["rework"], f"{path}.rework", states[1:], names),
-                                   scrap=_state_table(doc["scrap"], f"{path}.scrap", states, names)), path)
+                                   scrap=_state_table(doc["scrap"], f"{path}.scrap", states, names,
+                                                      lambda v, p: _scrap(v, p, scrap_floor))), path)
 
 
 def _stage_processing(doc: Json, path: str, feature_processing: dict[str, float] | None) -> float:
@@ -221,22 +232,24 @@ def _stage_processing(doc: Json, path: str, feature_processing: dict[str, float]
     return total
 
 
-def _per_feature(data: object, path: str, names: list[str], described_as: str = "") -> dict[str, float]:
-    costs = {name: _cost(value, f"{path}.{name}") for name, value in _object(data, path).items()}
+def _per_feature(data: object, path: str, names: list[str], described_as: str = "",
+                 parse: Callable[[object, str], float] | None = None) -> dict[str, float]:
+    costs = {name: (parse or _cost)(value, f"{path}.{name}") for name, value in _object(data, path).items()}
     if set(costs) != set(names):
         expected = f"{described_as} {names}" if described_as else str(names)
         raise ValueError(f"{path}: need a cost for exactly {expected}, got {sorted(costs)}")
     return costs
 
 
-def _state_table(data: object, path: str, states: tuple[State, ...], names: tuple[str, ...]) -> dict[State, float]:
+def _state_table(data: object, path: str, states: tuple[State, ...], names: tuple[str, ...],
+                 parse: Callable[[object, str], float] | None = None) -> dict[State, float]:
     """A cost for each of `states`, keyed as in C7; missing or extra states are named by their keys."""
     table: dict[State, float] = {}
     for key, value in _object(data, path).items():
         state = _parse_state(key, path, names)
         if state in table:
             raise ValueError(f"{path}: state {key!r} is given twice")
-        table[state] = _cost(value, f"{path}.{key}")
+        table[state] = (parse or _cost)(value, f"{path}.{key}")
     for label, wrong in (("missing", [s for s in states if s not in table]),
                          ("unexpected", [s for s in table if s not in states])):
         if wrong:
@@ -345,6 +358,13 @@ def _number(data: object, path: str) -> float:
     if isinstance(data, bool) or not isinstance(data, (int, float)) or not math.isfinite(data):
         raise ValueError(f"{path}: expected a finite number, got {data!r}")
     return float(data)
+
+
+def _scrap(data: object, path: str, floor: float) -> float:
+    value = _number(data, path)
+    if value < floor:
+        raise ValueError(f"{path}: must be at least minus the material_value, {floor!r}, got {value!r}")
+    return value
 
 
 def _cost(data: object, path: str) -> float:

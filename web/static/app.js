@@ -128,6 +128,9 @@ function renderEditor() {
   wrap.replaceChildren(
     el("label", {}, "Name", bind(el("input", { type: "text" }), () => doc().name ?? "", (v) => b.setName(v))),
     el("label", {}, "Selling Price", numberInput(() => doc().selling_price, (v) => b.setSellingPrice(v))),
+    el("label", {}, "Material Value", numberInput(() => b.materialValue, (v) => b.setMaterialValue(v)),
+      el("span", { className: "hint" }, "The raw material's value, paid for every part started: a sold part " +
+        "recovers it through the Selling Price, a scrapped part loses it.")),
   );
   if (!b.meansEditable) {
     wrap.append(el("p", { className: "muted" }, `Mean Settings use the ${doc().means.scheme} scheme and are ` +
@@ -263,9 +266,10 @@ function inspectionEditor(i) {
   return box;
 }
 
-// One row per Feature (shortcut) or per state (full table), C8. Scrap Cost is cumulative and never summed for the
-// user; the earlier Stages' Processing Costs are shown beside it as a hint, and its fields are marked for checking
-// when those change (C9, C25). The Stage's Processing Cost is its Operations' sum, edited on the Operations (C22).
+// Rework Costs per Feature (shortcut) or per state (full table), C8. In the shortcut a nominal Rework Cost is half
+// the Operation's Processing Cost until one is typed (C30), and the Stage has one Scrap Cost (C29). A Scrap Cost is
+// the extra cost of scrapping, on top of what the part has already lost (C28). The Stage's Processing Cost is its
+// Operations' sum, edited on the Operations (C22).
 function costEditor(i) {
   const b = builder;
   const { costs } = b.document.stages[i];
@@ -284,43 +288,50 @@ function costEditor(i) {
   wrap.append(el("label", { className: "inline" }, "Costs",
     bind(mode, () => (shortcut ? "shortcut" : "full"), (v) => b.setCostMode(i, v), { redraw: true })));
 
-  const [reworkTable, scrapTable] = shortcut ? ["rework_per_feature", "scrap_per_feature"] : ["rework", "scrap"];
+  const stageCosts = () => b.document.stages[i].costs;
   const table = el("table", { className: "cost-table" });
-  table.createTHead().innerHTML = `<tr><th>${shortcut ? "Feature" : "State"}</th><th>Rework Cost</th>` +
-    "<th>Scrap Cost (includes value added in earlier Stages)</th></tr>";
+  table.createTHead().innerHTML = shortcut ? "<tr><th>Feature</th><th>Rework Cost</th></tr>"
+    : "<tr><th>State</th><th>Rework Cost</th><th>Scrap Cost (extra)</th></tr>";
   const body = table.createTBody();
-  for (const key of Object.keys(costs[scrapTable])) {
+  const keys = Object.keys(shortcut ? costs.rework_per_feature : costs.scrap);
+  for (const key of keys) {
     const tr = body.insertRow();
     tr.insertCell().textContent = key;
-    tr.insertCell().append(key in costs[reworkTable]
-      ? numberInput(() => b.document.stages[i].costs[reworkTable][key], (v) => b.setCost(i, "rework", key, v))
-      : "–");
-    tr.insertCell().append(scrapInput(i, scrapTable, key));
+    const reworkTable = shortcut ? "rework_per_feature" : "rework";
+    tr.insertCell().append(key in costs[reworkTable] ? reworkInput(i, reworkTable, key) : "–");
+    if (!shortcut) {
+      tr.insertCell().append(numberInput(() => stageCosts().scrap[key], (v) => b.setCost(i, "scrap", key, v)));
+    }
   }
-  wrap.append(el("div", { className: "scroll" }, table));
-  if (shortcut) {
-    wrap.append(el("p", { className: "muted" },
-      "A scrapped part costs the sum of these Scrap Costs; a Rework State, the sum of its Features' Rework Costs."));
+  if (keys.length) wrap.append(el("div", { className: "scroll" }, table));
+  wrap.append(el("p", { className: "muted" }, shortcut
+    ? "Rework Cost: each time a Feature is reworked; a part needing several costs their sum. Nominally half the " +
+      "Operation's Processing Cost, as rework usually costs less than doing the Operation."
+    : "Rework Cost: each time a part passes through the state."));
+  if (shortcut && b.document.stages[i].features.length) {
+    wrap.append(el("label", { className: "inline" }, "Scrap Cost (extra)",
+      numberInput(() => b.stageScrap(i), (v) => b.setStageScrap(i, v))));
   }
-  if (i > 0) {
-    wrap.append(live(el("p", { className: "muted" }), () => "Earlier Stages' Processing Costs: " +
-      b.earlierProcessing(i).map((c, k) => `${fmtMean(c)} (Stage ${k + 1})`).join(", ")));
-  }
+  wrap.append(live(el("p", { className: "muted" }), () => {
+    const { material, processing, total } = b.lostOnScrap(i);
+    const parts = processing.map((c, k) => `${fmtMean(c)} (Stage ${k + 1})`).join(" + ");
+    return `A part scrapped here has already lost ${fmtMean(total)}: Material Value ${fmtMean(material)} + ` +
+      `Processing Costs ${parts}, plus any Rework Costs it incurred. The Scrap Cost is charged on top: 0 for ` +
+      `nothing more, a disposal cost, or negative for material recovered (down to −${fmtMean(material)}).`;
+  }));
   return wrap;
 }
 
-// A Scrap Cost field, amber with "check" beside it while the earlier Stages' Processing Costs have changed (C25).
-function scrapInput(i, table, key) {
+// A Rework Cost field, in grey italics while it is half the Operation's Processing Cost (C30).
+function reworkInput(i, table, key) {
   const b = builder;
-  const input = numberInput(() => b.document.stages[i].costs[table][key], (v) => b.setCost(i, "scrap", key, v));
-  const marker = el("span", { className: "check-marker" }, "check");
+  const input = numberInput(() => b.document.stages[i].costs[table][key], (v) => b.setCost(i, "rework", key, v));
   bindings.push(() => {
-    const check = b.scrapNeedsCheck(i);
-    input.classList.toggle("check", check);
-    input.title = check ? "Earlier Stages' Processing Costs changed: check this cumulative Scrap Cost" : "";
-    marker.hidden = !check;
+    const auto = b.isAutoRework(i, key);
+    input.classList.toggle("auto", auto);
+    input.title = auto ? "Half the Operation's Processing Cost until you type a cost" : "";
   });
-  return el("span", { className: "scrap-cell" }, input, marker);
+  return input;
 }
 
 function showResults(results) {
@@ -330,6 +341,7 @@ function showResults(results) {
   row(table, "Expected Profit", money(t.expected_profit));
   row(table, "Revenue", money(t.revenue));
   row(table, "Production cost", money(t.production_cost));
+  if (t.material_cost) row(table, "material", money(t.material_cost), "num", true);
   row(table, "processing", money(t.processing_cost), "num", true);
   row(table, "rework", money(t.rework_cost), "num", true);
   row(table, "scrap", money(t.scrap_cost), "num", true);

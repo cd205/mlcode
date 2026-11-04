@@ -24,7 +24,7 @@ export class Builder {
   #autoMeans = new Set();  // names of Features whose Mean Setting still follows L and U (C17)
   #autoProcessing = new Set();  // names of Operations whose Processing Cost still follows their name (C23)
   #splitStages = new Set();  // indices of Stages whose Processing Cost was split evenly on loading (C24)
-  #checkScrap = new Set();  // indices of Stages whose Scrap Costs to check: earlier Processing Costs changed (C25)
+  #autoRework = new Set();  // names of Operations whose Rework Cost is still half their Processing Cost (C30)
 
   // A Stage whose Operations carry no Processing Costs (a preset) has its total split evenly across them, which
   // keeps the total, and so every result, unchanged (C24).
@@ -42,9 +42,9 @@ export class Builder {
     });
   }
 
-  // One Operation and its Inspection; Selling Price and costs 0.
+  // One Operation and its Inspection; Selling Price 100 (C31), Material Value and the Inspection's costs 0.
   static blank() {
-    const b = new Builder({ format_version: 1, name: "New sequence", selling_price: 0, stages: [],
+    const b = new Builder({ format_version: 1, name: "New sequence", selling_price: 100, material_value: 0, stages: [],
                             means: { scheme: "per_feature", values: [] } });
     b.addOperation();
     b.addInspection();
@@ -125,6 +125,10 @@ export class Builder {
       if (i === MAX_INSPECTIONS) {
         problems.push({ row, message: `A Sequence can have at most ${MAX_INSPECTIONS} Inspections.` });
       }
+      if (n > 0 && lowestScrap(stage) < -this.materialValue) {
+        problems.push({ row, message: `Stage ${i + 1}'s Scrap Cost recovers more than the Material Value, ` +
+                                      `${this.materialValue}.` });
+      }
       row += 1;
     });
     if (row === 0 && !this.#open) problems.push({ row: 0, message: "The list is empty: add an Operation." });
@@ -147,11 +151,21 @@ export class Builder {
   // The note on Stage i's Processing Cost while it is still the preset's total split evenly (C24), else null.
   processingNote(i) { return this.#splitStages.has(i) ? "split evenly from the preset's Stage total" : null; }
 
-  // The earlier Stages' Processing Costs: the hint beside a cumulative Scrap Cost (C9).
-  earlierProcessing(i) { return this.#doc.stages.slice(0, i).map((s) => s.costs.processing); }
+  // Paid for every part started (C27); a preset without one has 0.
+  get materialValue() { return this.#doc.material_value ?? 0; }
 
-  // True from when the earlier Stages' Processing Costs change until one of Stage i's Scrap Costs is edited (C25).
-  scrapNeedsCheck(i) { return this.#checkScrap.has(i); }
+  // What a part scrapped at Stage i has already lost, before its Scrap Cost: the Material Value and each Stage's
+  // Processing Cost to date (C28). Any Rework Costs it incurred come on top.
+  lostOnScrap(i) {
+    const processing = this.#doc.stages.slice(0, i + 1).map((s) => s.costs.processing);
+    return { material: this.materialValue, processing, total: this.materialValue + sum(processing) };
+  }
+
+  // In the shortcut, a scrapped part costs the sum of the per-Feature Scrap Costs: one value for the Stage (C29).
+  stageScrap(i) { return sum(Object.values(this.#doc.stages[i].costs.scrap_per_feature)); }
+
+  // True while the Rework Cost of Feature `name` in Stage i is half its Processing Cost and follows it (C30).
+  isAutoRework(i, name) { return "rework_per_feature" in this.#doc.stages[i].costs && this.#autoRework.has(name); }
 
   // A full table can become the per-Feature shortcut only when it is additive, so nothing is lost (C8).
   canUseShortcut(i) {
@@ -168,7 +182,23 @@ export class Builder {
 
   setName(name) { this.#edit((seq) => { seq.name = String(name); }); }
 
-  setSellingPrice(value) { this.#edit((seq) => { seq.selling_price = cost(value, "Selling Price"); }); }
+  // Never 0 here (C31), though R1's preset loads with 0 (C14).
+  setSellingPrice(value) {
+    const price = number(value, "Selling Price");
+    if (!(price > 0)) throw new Error("Selling Price must be more than 0.");
+    this.#edit((seq) => { seq.selling_price = price; });
+  }
+
+  setMaterialValue(value) { this.#edit((seq) => { seq.material_value = cost(value, "Material Value"); }); }
+
+  setStageScrap(i, value) {
+    const total = this.#scrapCost(value);
+    if (!this.#doc.stages[i].features.length) throw new Error(`Stage ${i + 1} has no Operations to scrap.`);
+    this.#edit((seq) => {
+      const { costs, features } = seq.stages[i];
+      costs.scrap_per_feature = onFirstFeature(features, total);
+    });
+  }
 
   setFeature(i, j, field, value) {
     if (field === "name") return this.#rename(i, j, value);
@@ -178,7 +208,7 @@ export class Builder {
         this.#requireMeans();  // it changes the Stage's Rework States, which other schemes may key on
         if (!REWORK_SIDES.includes(value)) throw new Error(`Rework Side must be one of ${REWORK_SIDES.join(", ")}.`);
         f.rework_side = value;
-        syncCosts(seq.stages[i]);
+        syncCosts(seq.stages[i], this.#nominalRework(seq.stages[i]));
         return;
       }
       if (field === "processing") {
@@ -186,6 +216,7 @@ export class Builder {
         this.#autoProcessing.delete(f.name);
         this.#splitStages.delete(i);
         syncProcessing(seq.stages[i]);
+        this.#followRework(seq.stages[i]);
         return;
       }
       if (field !== "lower" && field !== "upper") throw new Error(`Unknown Feature field ${field}.`);
@@ -225,15 +256,17 @@ export class Builder {
     });
   }
 
-  // `kind` is rework or scrap; `key` is a state key (full table) or a Feature name (per-Feature shortcut).
+  // `kind` is rework or scrap; `key` is a state key (full table) or a Feature name (per-Feature shortcut). A
+  // shortcut's Scrap Cost is the Stage's, set with setStageScrap.
   setCost(i, kind, key, value) {
+    const amount = kind === "scrap" ? this.#scrapCost(value) : cost(value, "Rework Cost");
     this.#edit((seq) => {
       const { costs } = seq.stages[i];
       const table = costs[`${kind}_per_feature`] ?? costs[kind];
       if (!table || !(key in table)) throw new Error(`No ${kind} cost for ${key}.`);
-      table[key] = cost(value, kind === "rework" ? "Rework Cost" : "Scrap Cost");
+      table[key] = amount;
+      if (kind === "rework") this.#autoRework.delete(key);
     });
-    if (kind === "scrap") this.#checkScrap.delete(i);
   }
 
   setCostMode(i, mode) {
@@ -241,7 +274,7 @@ export class Builder {
       const stage = seq.stages[i];
       const { costs, features } = stage;
       if (mode === "full" && "rework_per_feature" in costs) {
-        const total = Object.values(costs.scrap_per_feature).reduce((a, b) => a + b, 0);
+        const total = sum(Object.values(costs.scrap_per_feature));
         stage.costs = { processing: costs.processing, rework: { ...costs.rework_per_feature }, scrap: { [INITIAL]: total } };
         syncCosts(stage);  // fills the multi-Feature states additively, and every Scrap Cost with the total
       } else if (mode === "shortcut" && !("rework_per_feature" in costs)) {
@@ -267,7 +300,8 @@ export class Builder {
       const stage = seq.stages[i];
       stage.features.push(newFeature(chosen));
       stage.variation.sigmas.push(DEFAULT_FEATURE.sigma);
-      syncCosts(stage);
+      this.#autoRework.add(chosen);
+      syncCosts(stage, this.#nominalRework(stage));
       syncProcessing(stage);
       seq.means.values[i][chosen] = midpoint(DEFAULT_FEATURE);
       this.#autoMeans.add(chosen);
@@ -299,7 +333,7 @@ export class Builder {
     this.#edit((seq) => {
       const stage = seq.stages[i];
       for (const list of [stage.features, stage.variation.sigmas]) [list[j], list[target]] = [list[target], list[j]];
-      syncCosts(stage);  // state keys in the new Feature order (C7)
+      syncCosts(stage, this.#nominalRework(stage));  // state keys in the new Feature order (C7)
       orderMeans(seq, i);
     });
   }
@@ -342,12 +376,11 @@ export class Builder {
       to.variation.sigmas.unshift(...from.variation.sigmas);
       seq.means.values[i] = { ...means, ...seq.means.values[i] };
       orderMeans(seq, i);
-      syncCosts(to);
+      syncCosts(to, this.#carriedRework(from, to));
       syncProcessing(to);
       this.#splitStages = withoutStage(this.#splitStages, i);
       this.#splitStages.delete(i);  // the merged Stage's total is no longer the preset's
-      this.#checkScrap = withoutStage(this.#checkScrap, i);
-    }, this.#open, (k) => (k < i ? k : k + 1));
+    }, this.#open);
   }
 
   #isOpen(i) { return this.#open && i === this.#doc.stages.length - 1; }
@@ -357,9 +390,9 @@ export class Builder {
   }
 
   // Moves Feature j of Stage s past the Inspection between it and Stage t = s ± 1, to the start of t going down or
-  // the end of t going up. Its cost entries leave s and t's tables take it in, as for a new Feature (§7); its
-  // Processing Cost and Mean Setting go with it. Past the last Inspection it becomes unclosed; moving up the only
-  // unclosed Operation closes the list again.
+  // the end of t going up. Its Rework Cost, Processing Cost and Mean Setting go with it (C30); the Scrap Cost
+  // stays with s, as the Stage's (C29), and t's tables take the Feature in as for a new one (§7). Past the last
+  // Inspection it becomes unclosed; moving up the only unclosed Operation closes the list again.
   #moveAcross(s, j, t) {
     const { stages } = this.#doc;
     if (t < 0) throw new Error("The first Operation can't move up.");
@@ -380,10 +413,9 @@ export class Builder {
       seq.means.values[t][feature.name] = seq.means.values[s][feature.name];
       delete seq.means.values[s][feature.name];
       orderMeans(seq, t);
-      for (const stage of [from, to]) {
-        syncCosts(stage);
-        syncProcessing(stage);
-      }
+      syncCosts(to, this.#carriedRework(from, to));  // before `from` drops the Feature's entries
+      syncCosts(from);
+      for (const stage of [from, to]) syncProcessing(stage);
       this.#splitStages.delete(s);
       this.#splitStages.delete(t);
       if (closing) this.#dropLastStage(seq);
@@ -395,7 +427,6 @@ export class Builder {
     const i = seq.stages.length - 1;
     seq.stages.pop();
     seq.means.values.pop();
-    this.#checkScrap.delete(i);
     this.#splitStages.delete(i);
   }
 
@@ -420,6 +451,7 @@ export class Builder {
     delete seq.means.values[i][feature.name];
     this.#autoMeans.delete(feature.name);
     this.#autoProcessing.delete(feature.name);
+    this.#autoRework.delete(feature.name);
   }
 
   #rename(i, j, value) {
@@ -439,12 +471,41 @@ export class Builder {
       }
       seq.means.values[i] = renameKeys(seq.means.values[i]);
       if (this.#autoMeans.delete(old)) this.#autoMeans.add(name);
+      if (this.#autoRework.delete(old)) this.#autoRework.add(name);
       if (this.#autoProcessing.delete(old)) {
         this.#autoProcessing.add(name);
         stage.features[j].processing = nominalProcessing(name);
         syncProcessing(stage);
+        this.#followRework(stage);
       }
     });
+  }
+
+  // A Rework Cost for a Feature new to `stage`'s tables: half its Processing Cost while it follows it, else 0 (C30).
+  #nominalRework(stage) {
+    return (name) => (this.#autoRework.has(name) ? halfProcessing(stage, name) : 0);
+  }
+
+  // For Features joining `to` from `from`: the Rework Cost they had there, or half their Processing Cost (C30).
+  #carriedRework(from, to) {
+    const own = (name) => from.costs.rework_per_feature?.[name] ?? from.costs.rework?.[name];
+    return (name) => (this.#autoRework.has(name) ? halfProcessing(to, name) : own(name) ?? 0);
+  }
+
+  // Keeps the following Rework Costs at half their Operations' Processing Costs (C30).
+  #followRework(stage) {
+    const table = stage.costs.rework_per_feature;
+    if (!table) return;
+    for (const name of Object.keys(table)) if (this.#autoRework.has(name)) table[name] = halfProcessing(stage, name);
+  }
+
+  // A Scrap Cost may be negative, for material recovered, down to minus the Material Value (C28).
+  #scrapCost(value) {
+    const x = number(value, "Scrap Cost");
+    if (x < -this.materialValue) {
+      throw new Error(`A Scrap Cost can recover at most the Material Value, ${this.materialValue}.`);
+    }
+    return x;
   }
 
   #requireMeans() {
@@ -472,19 +533,16 @@ export class Builder {
     if (!this.variationEditable(i)) throw new Error(`Stage ${i + 1}'s Process Variation is read-only here.`);
   }
 
-  // Applies `change` to a copy, which becomes the list, with `open` saying whether its last Stage is now open and
-  // `oldIndex` giving each Stage's index before the change. An edited preset is no longer the thesis case, so its
-  // reference goes. A Stage whose earlier Stages' Processing Costs now total differently has its Scrap Costs flagged
-  // for checking (C25).
-  #edit(change, open = this.#open, oldIndex = (i) => i) {
+  // Applies `change` to a copy, which becomes the list, with `open` saying whether its last Stage is now open. An
+  // edited preset is no longer the thesis case, so its reference goes. Rework Costs in a full table don't follow
+  // Processing Costs, however the Feature got there (C30).
+  #edit(change, open = this.#open) {
     const seq = structuredClone(this.#doc);
-    const before = earlierProcessingTotals(this.#doc);
     change(seq);
     delete seq.reference;
-    earlierProcessingTotals(seq).forEach((total, i) => {
-      const k = oldIndex(i);
-      if (k < before.length && !close(total, before[k])) this.#checkScrap.add(i);
-    });
+    for (const stage of seq.stages) {
+      if (!("rework_per_feature" in stage.costs)) for (const f of stage.features) this.#autoRework.delete(f.name);
+    }
     this.#doc = seq;
     this.#open = open;
     this.#revision += 1;
@@ -498,15 +556,16 @@ function newFeature(name) {
 
 const nominalProcessing = (name) => NOMINAL_PROCESSING[name.replace(/\d+$/, "")] ?? 1;
 
-// For each Stage, the total Processing Cost of the Stages before it.
-function earlierProcessingTotals(seq) {
-  let total = 0;
-  return seq.stages.map((stage) => {
-    const earlier = total;
-    total += stage.costs.processing;
-    return earlier;
-  });
-}
+const halfProcessing = (stage, name) => stage.features.find((f) => f.name === name).processing / 2;
+
+const sum = (values) => values.reduce((a, b) => a + b, 0);
+
+// The shortcut's per-Feature Scrap Costs for a Stage Scrap Cost of `total`: all on the first Feature (C29).
+const onFirstFeature = (features, total) => Object.fromEntries(features.map((f, j) => [f.name, j === 0 ? total : 0]));
+
+// The lowest Scrap Cost of a part scrapped at the Stage: the shortcut's sum, or a full table's least.
+const lowestScrap = ({ costs }) => ("scrap_per_feature" in costs
+  ? sum(Object.values(costs.scrap_per_feature)) : Math.min(...Object.values(costs.scrap)));
 
 // A set of Stage indices once Stage i is gone: i's dropped, the later ones each one less.
 const withoutStage = (indices, i) => new Set([...indices].filter((k) => k !== i).map((k) => (k > i ? k - 1 : k)));
@@ -586,15 +645,17 @@ export function reworkStateKeys(features) {
 // The same state whatever order its Feature names are in (C7).
 const canonical = (key) => key.split("+").sort().join("+");
 
-// Brings the cost tables in line with the Stage's Features, keeping every cost that still applies. A new Feature
-// costs 0 (C17); in a full table a new Rework State costs the sum of its Features' rework, and a new state's Scrap
-// Cost is the Initial State's.
-function syncCosts(stage) {
+// Brings the cost tables in line with the Stage's Features, keeping every cost that still applies. A Feature new
+// to the tables has Rework Cost `newRework(name)`; in a full table a new Rework State costs the sum of its Features'
+// rework, and a new state's Scrap Cost is the Initial State's. The shortcut's Scrap Cost is the Stage's, kept on
+// its first Feature (C29).
+function syncCosts(stage, newRework = () => 0) {
   const { costs, features } = stage;
   if ("rework_per_feature" in costs) {
     const reworkable = features.filter((f) => f.rework_side !== "none");
-    costs.rework_per_feature = Object.fromEntries(reworkable.map((f) => [f.name, costs.rework_per_feature[f.name] ?? 0]));
-    costs.scrap_per_feature = Object.fromEntries(features.map((f) => [f.name, costs.scrap_per_feature[f.name] ?? 0]));
+    costs.rework_per_feature = Object.fromEntries(reworkable.map((f) =>
+      [f.name, costs.rework_per_feature[f.name] ?? newRework(f.name)]));
+    costs.scrap_per_feature = onFirstFeature(features, sum(Object.values(costs.scrap_per_feature)));
     return;
   }
   const lookup = (table) => new Map(Object.entries(table).map(([k, v]) => [canonical(k), v]));
@@ -602,7 +663,7 @@ function syncCosts(stage) {
   const scrap = lookup(costs.scrap);
   const keys = reworkStateKeys(features);
   const reworkCost = (key) => rework.get(canonical(key)) ??
-    key.split("+").reduce((sum, name) => sum + (rework.get(name) ?? 0), 0);
+    key.split("+").reduce((total, name) => total + (rework.get(name) ?? newRework(name)), 0);
   costs.rework = Object.fromEntries(keys.map((k) => [k, reworkCost(k)]));
   const initialScrap = scrap.get(INITIAL) ?? 0;
   costs.scrap = Object.fromEntries([INITIAL, ...keys].map((k) => [k, scrap.get(canonical(k)) ?? initialScrap]));

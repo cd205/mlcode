@@ -124,3 +124,44 @@ class TestBreakdown:
 
     def test_keeps_each_stage_result(self, result):
         assert [stage.final_conformance for stage in result.stages] == pytest.approx([self.f, self.f], abs=1e-14)
+
+
+class TestMaterialValue:
+    """C27, ADR 0006: the raw material's value, paid for every part started; a sold part recovers it through the
+    Selling Price, a scrapped part loses it. Scrap Cost may be negative down to minus it (material recovered)."""
+
+    def with_material(self, material_value, scrap=(10.0, 27.0)):
+        r5 = table_3_5()
+        stages = tuple(one_feature_stage(s.feature_names[0], s.features[0].lower, s.features[0].upper,
+                                         processing=s.costs.processing, rework=rc, scrap=sc)
+                       for s, rc, sc in zip(r5.stages, (15.0, 12.0), scrap))
+        return Sequence(stages, selling_price=120.0, material_value=material_value)
+
+    def test_defaults_to_zero(self):
+        result = evaluate_at(table_3_5(), 10.466, 15.591)
+        assert table_3_5().material_value == 0.0
+        assert result.material_cost == 0.0
+
+    @pytest.mark.parametrize("mu", [(10.466, 15.591), (11.0, 14.0)])
+    def test_is_charged_once_per_part_started_at_any_mean_setting(self, mu):
+        without = evaluate_at(table_3_5(), *mu)
+        result = evaluate_at(self.with_material(5.0), *mu)
+        assert result.material_cost == 5.0
+        assert result.production_cost == pytest.approx(without.production_cost + 5.0, abs=1e-12)
+        assert result.expected_profit == pytest.approx(without.expected_profit - 5.0, abs=1e-12)
+        assert result.final_conformance == without.final_conformance
+
+    def test_a_scrap_cost_may_recover_up_to_the_material_value(self):
+        recovered = evaluate_at(self.with_material(5.0, scrap=(-5.0, 0.0)), 10.466, 15.591)
+        assert recovered.scrap_costs[0] < 0
+
+    def test_a_scrap_cost_recovering_more_than_the_material_value_is_refused(self):
+        with pytest.raises(ValueError, match=r"Stage 1's Scrap Cost -5\.5 is below minus the Material Value, -5\.0"):
+            self.with_material(5.0, scrap=(-5.5, 0.0))
+        with pytest.raises(ValueError, match="below minus the Material Value"):
+            self.with_material(0.0, scrap=(-0.1, 0.0))
+
+    @pytest.mark.parametrize("value", [-1.0, float("inf"), float("nan")])
+    def test_must_be_finite_and_non_negative(self, value):
+        with pytest.raises(ValueError, match="Material Value"):
+            self.with_material(value)

@@ -81,6 +81,7 @@ def _totals(b: ProfitBreakdown) -> Json:
         "expected_profit": b.expected_profit,
         "revenue": b.revenue,
         "final_conformance": b.final_conformance,
+        "material_cost": b.material_cost,
         "processing_cost": sum(b.processing_costs),
         "scrap_cost": sum(b.scrap_costs),
         "rework_cost": sum(b.rework_costs),

@@ -49,9 +49,18 @@ test("a new Operation takes the next unused name and the C17 defaults", () => {
   assert.deepEqual(stage.features.map((f) => f.name), ["f2", "f1"]);
   assert.deepEqual(stage.features[1], { name: "f1", lower: 8, upper: 12, rework_side: "upper", processing: 1 });
   assert.deepEqual(stage.variation, { type: "normal", sigmas: [1, 1], corr: 0 });
-  assert.deepEqual(stage.costs, { processing: 2, rework_per_feature: { f2: 0, f1: 0 }, scrap_per_feature: { f2: 0, f1: 0 } });
+  // Rework Cost half the Processing Cost (C30); the Stage's one Scrap Cost, the extra cost of scrapping, 0 (C28, C29).
+  assert.deepEqual(stage.costs, { processing: 2, rework_per_feature: { f2: 0.5, f1: 0.5 }, scrap_per_feature: { f2: 0, f1: 0 } });
   assert.deepEqual(stage.inspection, { per_stage: 0, per_feature: 0 });
   assert.deepEqual(b.sequence.means.values[1], { f2: 10, f1: 10 });
+});
+
+test("a new sequence sells at 100, and the Selling Price can't be 0 (C31)", () => {
+  const b = Builder.blank();
+  assert.equal(b.sequence.selling_price, 100);
+  assert.throws(() => b.setSellingPrice(0), /Selling Price must be more than 0/);
+  assert.throws(() => b.setSellingPrice(-5), /Selling Price must be more than 0/);
+  assert.equal(b.sequence.selling_price, 100);
 });
 
 test("a new Operation given a name that is taken gets a numbered one", () => {
@@ -178,7 +187,7 @@ test("bad edits are refused with a readable message and change nothing", () => {
   assert.throws(() => b.setFeature(0, 1, "name", "a+b"), /letters, digits or underscores/);
   assert.throws(() => b.setFeature(0, 1, "name", "initial"), /reserved/);
   assert.throws(() => b.setFeature(0, 0, "lower", ""), /L must be a number/);
-  assert.throws(() => b.setCost(0, "scrap", "a", -1), /can't be negative/);
+  assert.throws(() => b.setCost(0, "scrap", "a", -1), /recover at most the Material Value, 0/);
   assert.throws(() => b.setSigma(0, 0, 0), /positive/);
   assert.throws(() => b.addOperation("x".repeat(17)), /letters, digits or underscores/);
   assert.equal(b.sequence, before);
@@ -221,7 +230,7 @@ test("Add Operation appends an unclosed Operation; Add Inspection closes it into
   assert.deepEqual(b.problems, []);
   const stage = b.sequence.stages[1];
   assert.deepEqual(stage.features.map((f) => f.name), ["f2", "f3"]);
-  assert.deepEqual(stage.costs, { processing: 2, rework_per_feature: { f2: 0, f3: 0 }, scrap_per_feature: { f2: 0, f3: 0 } });
+  assert.deepEqual(stage.costs, { processing: 2, rework_per_feature: { f2: 0.5, f3: 0.5 }, scrap_per_feature: { f2: 0, f3: 0 } });
   assert.deepEqual(b.sequence.means.values, [{ f1: 10 }, { f2: 10, f3: 10 }]);
 });
 
@@ -293,29 +302,6 @@ test("a sequence whose Operations carry Processing Costs loads them as they are"
   assert.equal(b.processingNote(0), null);
 });
 
-test("a change to earlier Stages' Processing Costs flags a Stage's Scrap Costs for checking, never changes them", () => {
-  const two = () => new Builder({ ...r4().sequence, stages: [r4().sequence.stages[0], serialStage("c")],
-                                  means: { scheme: "per_feature", values: [{ a: 10.537, b: 15.59 }, { c: 10 }] } });
-  const b = two();
-  assert.deepEqual([b.scrapNeedsCheck(0), b.scrapNeedsCheck(1)], [false, false]);
-  b.setFeature(1, 0, "processing", 9);  // the last Stage's own cost: nothing after it
-  b.setCost(1, "rework", "c", 4);
-  assert.equal(b.scrapNeedsCheck(1), false);
-  b.setFeature(0, 0, "processing", 30);
-  assert.deepEqual([b.scrapNeedsCheck(0), b.scrapNeedsCheck(1)], [false, true]);
-  assert.deepEqual(b.sequence.stages[1].costs.scrap_per_feature, { c: 2 });
-  b.setCost(1, "rework", "c", 5);  // not a Scrap Cost
-  assert.equal(b.scrapNeedsCheck(1), true);
-  b.setCost(1, "scrap", "c", 2);  // checked, even if left as it was
-  assert.equal(b.scrapNeedsCheck(1), false);
-
-  const deleted = two();
-  deleted.addOperation("drill");
-  deleted.addInspection();
-  deleted.deleteOperation(0, 0);
-  assert.deepEqual([1, 2].map((i) => deleted.scrapNeedsCheck(i)), [true, true]);
-});
-
 // R4's Parallel Stage (full table) then a Serial Stage c (shortcut).
 const twoStages = () => new Builder({ ...r4().sequence, stages: [r4().sequence.stages[0], serialStage("c")],
                                       means: { scheme: "per_feature", values: [{ a: 10.537, b: 15.59 }, { c: 10 }] } });
@@ -332,8 +318,8 @@ test("an Operation moved down past an Inspection starts the next Stage, its cost
   assert.deepEqual(first.variation.sigmas, [1]);
   assert.deepEqual(second.features.map((f) => [f.name, f.processing]), [["b", 22.5], ["c", 5]]);
   assert.deepEqual(second.variation.sigmas, [1, 1]);
-  // A new Feature in the shortcut costs 0 (C17); c keeps its costs.
-  assert.deepEqual(second.costs, { processing: 27.5, rework_per_feature: { b: 0, c: 1 }, scrap_per_feature: { b: 0, c: 2 } });
+  // b takes its Rework Cost (C30); the Stage keeps its Scrap Cost, now on its first Feature (C29).
+  assert.deepEqual(second.costs, { processing: 27.5, rework_per_feature: { b: 12, c: 1 }, scrap_per_feature: { b: 2, c: 0 } });
   assert.deepEqual(b.sequence.means.values, [{ a: 10.537 }, { b: 15.59, c: 10 }]);
   assert.equal(b.sequence.reference, undefined);
 });
@@ -345,7 +331,7 @@ test("an Operation moved up into a full table adds its Rework States at the sum 
   assert.deepEqual(b.rows.map(describe).slice(0, 4),
     ["a 8–12 μ 10.537", "b 13–17 μ 15.59", "c 8–12 μ 10", "Inspection · Stage 1 · Parallel"]);
   const { costs } = b.document.stages[0];
-  assert.deepEqual(costs.rework, { a: 15, b: 12, c: 0, "a+b": 27, "a+c": 15, "b+c": 12, "a+b+c": 27 });
+  assert.deepEqual(costs.rework, { a: 15, b: 12, c: 1, "a+b": 27, "a+c": 16, "b+c": 13, "a+b+c": 28 });  // c's own (C30)
   assert.deepEqual(costs.scrap,
     { initial: 30, a: 27, b: 27, c: 30, "a+b": 27, "a+c": 30, "b+c": 30, "a+b+c": 30 });
   assert.equal(costs.processing, 50);
@@ -361,16 +347,15 @@ test("an Operation moved down past the last Inspection is left unclosed; moved b
   assert.deepEqual(b.problems.map((p) => p.row), [3, 4]);
   b.moveOperation(2, 0, -1);
   assert.deepEqual(b.problems, []);
-  assert.deepEqual(b.sequence.stages[1].costs, { processing: 5, rework_per_feature: { c: 0 }, scrap_per_feature: { c: 0 } });
+  assert.deepEqual(b.sequence.stages[1].costs, { processing: 5, rework_per_feature: { c: 1 }, scrap_per_feature: { c: 0 } });
   assert.equal(b.sequence.stages.length, 2);
 });
 
-test("moving an Operation between Stages moves its Processing Cost, flagging the later Stage's Scrap Costs", () => {
+test("moving an Operation between Stages moves its Processing Cost", () => {
   const b = twoStages();
   b.addOperation("drill");
   b.addInspection();  // Stage 3
-  b.moveOperation(1, 0, -1);  // c, 5, from Stage 2 to Stage 1: Stage 3's earlier total is unchanged
-  assert.deepEqual([0, 1, 2].map((i) => b.scrapNeedsCheck(i)), [false, true, false]);
+  b.moveOperation(1, 0, -1);  // c, 5, from Stage 2 to Stage 1
   assert.deepEqual(b.document.stages.map((s) => s.costs.processing), [50, 0, 2]);
 });
 
@@ -410,20 +395,6 @@ test("moving the last Inspection up leaves the Operation after it unclosed; down
   assert.equal(b.rows.at(-1).label, "Inspection · Stage 2 · Serial");
 });
 
-test("a move that leaves an earlier total as it was, bar rounding, flags nothing", () => {
-  const b = Builder.blank();
-  for (const [k, cost] of [0.1, 0.2, 0.7, 1].entries()) {
-    if (k) { b.addOperation(); b.addInspection(); }
-    b.setFeature(k, 0, "processing", cost);
-    b.setCost(k, "scrap", `f${k + 1}`, 0);  // clears the markers so far
-  }
-  b.moveOperation(1, 0, +1);  // f2 into Stage 3: its earlier total drops by 0.2; Stage 4's is 1 either way
-  b.moveOperation(2, 0, -1);  // and back
-  assert.deepEqual([0, 1, 2, 3].map((i) => b.scrapNeedsCheck(i)), [false, false, true, false]);
-  b.deleteInspection(1);
-  assert.equal(b.scrapNeedsCheck(2), false);  // 0.1 + 0.2 + 0.7 against 0.1 + 0.9
-});
-
 test("deleting an Inspection merges its Operations into the next Stage, which keeps its own costs", () => {
   const b = twoStages();
   b.setInspection(1, "per_stage", 0.5);
@@ -431,13 +402,12 @@ test("deleting an Inspection merges its Operations into the next Stage, which ke
   assert.deepEqual(b.rows.map(describe),
     ["a 8–12 μ 10.537", "b 13–17 μ 15.59", "c 8–12 μ 10", "Inspection · Stage 1 · Parallel"]);
   const [stage] = b.sequence.stages;
+  // a and b take their Rework Costs with them (C30); the Stage keeps its own Scrap Cost, on its first Feature (C29).
   assert.deepEqual(stage.costs,
-    { processing: 50, rework_per_feature: { a: 0, b: 0, c: 1 }, scrap_per_feature: { a: 0, b: 0, c: 2 } });
+    { processing: 50, rework_per_feature: { a: 15, b: 12, c: 1 }, scrap_per_feature: { a: 2, b: 0, c: 0 } });
   assert.deepEqual(stage.variation, { type: "normal", sigmas: [1, 1, 1], corr: 0 });
   assert.deepEqual(stage.inspection, { per_stage: 0.5, per_feature: 0 });
   assert.deepEqual(b.sequence.means.values, [{ a: 10.537, b: 15.59, c: 10 }]);
-  // c's Scrap Costs were cumulative over Stage 1's 45, which is no longer before them (C25).
-  assert.equal(b.scrapNeedsCheck(0), true);
 });
 
 test("deleting an Inspection is refused if the merged Stage would have more than 4 Operations", () => {
@@ -501,17 +471,6 @@ test("a Stage with preset-only variation locks its Operations and Inspection, an
   assert.throws(() => grouped.deleteInspection(0), /read-only/);
 });
 
-test("a Stage removed with its last unclosed Operation leaves no check marker for the next one", () => {
-  const b = Builder.blank();
-  b.addOperation();  // Stage 2, unclosed
-  b.setFeature(0, 0, "processing", 4);
-  assert.equal(b.scrapNeedsCheck(1), true);
-  b.deleteOperation(1, 0);
-  b.addOperation();
-  b.addInspection();
-  assert.equal(b.scrapNeedsCheck(1), false);
-});
-
 test("rows say how the sequence chain draws them: each Stage's shape and which Operations are unclosed", () => {
   const b = r4();
   b.addInspection();
@@ -520,4 +479,121 @@ test("rows say how the sequence chain draws them: each Stage's shape and which O
     ["a true", "b true", "0 Parallel", "1 no Operations", "drill false"]);
   b.addInspection();
   assert.deepEqual(b.rows.filter((r) => r.kind === "inspection").map((r) => r.shape), ["Parallel", "no Operations", "Serial"]);
+});
+
+test("a new Operation's Rework Cost is half its Processing Cost, following it until a Rework Cost is typed", () => {
+  const b = Builder.blank();  // f1, Processing Cost 1
+  const rework = (i) => b.document.stages[i].costs.rework_per_feature;
+  assert.deepEqual(rework(0), { f1: 0.5 });
+  assert.ok(b.isAutoRework(0, "f1"));
+  b.setFeature(0, 0, "name", "grind");  // Processing Cost 5
+  assert.deepEqual(rework(0), { grind: 2.5 });
+  b.setFeature(0, 0, "processing", 6);
+  assert.deepEqual(rework(0), { grind: 3 });
+  b.setCost(0, "rework", "grind", 4);
+  assert.equal(b.isAutoRework(0, "grind"), false);
+  b.setFeature(0, 0, "processing", 8);
+  assert.deepEqual(rework(0), { grind: 4 });
+
+  b.addOperation("drill");
+  b.addOperation("bore");
+  b.addInspection();  // a Parallel Stage: each Feature's own, summed for a part needing both
+  assert.deepEqual(rework(1), { drill: 1, bore: 1.5 });
+  b.setFeature(1, 1, "rework_side", "none");
+  assert.deepEqual(rework(1), { drill: 1 });
+  b.setFeature(1, 1, "rework_side", "upper");  // still following its Processing Cost
+  assert.deepEqual(rework(1), { drill: 1, bore: 1.5 });
+});
+
+test("a preset's Rework Costs are kept; a full table stops following", () => {
+  assert.equal(r4().isAutoRework(0, "a"), false);
+  const b = Builder.blank();
+  b.setCostMode(0, "full");
+  assert.deepEqual(b.document.stages[0].costs.rework, { f1: 0.5 });
+  assert.equal(b.isAutoRework(0, "f1"), false);
+  b.setFeature(0, 0, "processing", 4);
+  assert.deepEqual(b.document.stages[0].costs.rework, { f1: 0.5 });
+});
+
+test("an Operation moved to another Stage takes its Rework Cost, nominal or typed", () => {
+  const b = Builder.blank();  // f1
+  b.addOperation("drill");
+  b.addInspection();
+  b.setCost(1, "rework", "drill", 4);
+  b.moveOperation(1, 0, -1);
+  assert.deepEqual(b.document.stages[0].costs.rework_per_feature, { f1: 0.5, drill: 4 });
+  b.moveOperation(0, 0, +1);  // f1 below drill
+  b.moveOperation(0, 1, +1);  // and into Stage 2, still nominal
+  assert.deepEqual(b.document.stages[1].costs.rework_per_feature, { f1: 0.5 });
+  b.setFeature(1, 0, "processing", 3);
+  assert.deepEqual(b.document.stages[1].costs.rework_per_feature, { f1: 1.5 });
+});
+
+test("the cost shortcut has one Scrap Cost per Stage, nominally 0, which stays with the Stage", () => {
+  const b = Builder.blank();  // f1
+  b.addOperation("drill");
+  b.addOperation("bore");
+  b.addInspection();
+  assert.deepEqual([b.stageScrap(0), b.stageScrap(1)], [0, 0]);
+  b.setStageScrap(0, 2);
+  b.setStageScrap(1, "3");
+  assert.deepEqual(b.document.stages[1].costs.scrap_per_feature, { drill: 3, bore: 0 });  // on the first Feature
+  b.moveOperation(1, 0, -1);  // drill into Stage 1
+  assert.deepEqual(b.document.stages.map((s) => s.costs.scrap_per_feature), [{ f1: 2, drill: 0 }, { bore: 3 }]);
+  b.moveOperation(0, 0, +1);  // f1 down within Stage 1: drill is now first
+  assert.deepEqual(b.document.stages[0].costs.scrap_per_feature, { drill: 2, f1: 0 });
+  assert.equal(b.stageScrap(0), 2);
+  assert.throws(() => b.setStageScrap(0, ""), /Scrap Cost must be a number/);
+  // A preset's per-Feature Scrap Costs show as their sum: what a scrapped part costs.
+  const shortcut = new Builder({ ...r4().sequence,
+    stages: [{ ...r4().sequence.stages[0], costs: { processing: 45, rework_per_feature: { a: 15, b: 12 },
+                                                    scrap_per_feature: { a: 10, b: 17 } } }] });
+  assert.equal(shortcut.stageScrap(0), 27);
+});
+
+test("a Material Value is paid for every part, and a Scrap Cost may recover it but no more", () => {
+  const b = Builder.blank();
+  assert.equal(b.materialValue, 0);
+  b.setMaterialValue("5");
+  assert.equal(b.sequence.material_value, 5);
+  assert.throws(() => b.setMaterialValue(-1), /Material Value can't be negative/);
+  b.setStageScrap(0, -5);
+  assert.throws(() => b.setStageScrap(0, -5.5), /Scrap Cost can recover at most the Material Value, 5/);
+  b.setCostMode(0, "full");
+  b.setCost(0, "scrap", "f1", -4);
+  assert.throws(() => b.setCost(0, "scrap", "initial", -6), /at most the Material Value/);
+  assert.throws(() => b.setCost(0, "rework", "f1", -1), /Rework Cost can't be negative/);
+  b.setMaterialValue(2);  // now Stage 1's Scrap Costs recover more than the material
+  assert.deepEqual(b.problems, [{ row: 1, message: "Stage 1's Scrap Cost recovers more than the Material Value, 2." }]);
+  assert.equal(b.sequence, null);
+});
+
+test("a scrapped part has already lost its Material Value and the Processing Costs to date", () => {
+  const b = Builder.blank();  // f1: 1
+  b.setMaterialValue(5);
+  b.addOperation("drill");
+  b.addOperation("bore");
+  b.addInspection();
+  assert.deepEqual(b.lostOnScrap(0), { material: 5, processing: [1], total: 6 });
+  assert.deepEqual(b.lostOnScrap(1), { material: 5, processing: [1, 5], total: 11 });
+  assert.deepEqual(r4().lostOnScrap(0), { material: 0, processing: [45], total: 45 });
+});
+
+test("an Operation joining a full table stops following, as switching to one does", () => {
+  const b = Builder.blank();  // f1
+  b.setCostMode(0, "full");
+  b.addOperation("drill");
+  b.addInspection();
+  b.moveOperation(1, 0, -1);  // drill, nominal, into Stage 1's full table
+  assert.deepEqual(b.document.stages[0].costs.rework, { f1: 0.5, drill: 1, "f1+drill": 1.5 });
+  b.setCostMode(0, "shortcut");
+  assert.equal(b.isAutoRework(0, "drill"), false);
+  b.setFeature(0, 1, "processing", 6);
+  assert.equal(b.document.stages[0].costs.rework_per_feature.drill, 1);
+});
+
+test("a Stage with no Operations has no Scrap Cost to set", () => {
+  const b = Builder.blank();
+  b.deleteOperation(0, 0);
+  assert.throws(() => b.setStageScrap(0, 2), /Stage 1 has no Operations/);
 });

@@ -514,3 +514,53 @@ class TestOptimise:
     def test_omits_the_reference_check_which_is_for_the_given_means(self):
         assert "reference" in run(preset("r2"))
         assert "reference" not in run(preset("r2"), action="optimise", objective="production_cost")
+
+
+def with_material(doc, material_value):
+    return {**copy.deepcopy(doc), "material_value": material_value}
+
+
+class TestMaterialValue:
+    """C27, C28, ADR 0006: paid for every part started; a Scrap Cost may recover it, but no more."""
+
+    def test_defaults_to_zero_and_leaves_the_presets_unchanged(self):
+        totals = run(preset("r5"))["totals"]
+        assert totals["material_cost"] == 0.0
+        assert run(with_material(preset("r5"), 0)) == run(preset("r5"))
+
+    def test_is_charged_per_part_started(self):
+        before, after = run(preset("r5"))["totals"], run(with_material(preset("r5"), 5))["totals"]
+        assert after["material_cost"] == 5.0
+        assert after["expected_profit"] == pytest.approx(before["expected_profit"] - 5.0, abs=1e-12)
+        assert after["production_cost"] == pytest.approx(before["production_cost"] + 5.0, abs=1e-12)
+
+    def test_is_dumped_only_when_not_zero(self):
+        assert "material_value" not in dump_sequence(load_sequence(preset("r5")))
+        doc = with_material(preset("r5"), 5.0)
+        assert dump_sequence(load_sequence(doc)) == doc
+
+    def test_must_be_non_negative(self):
+        with pytest.raises(ValueError, match=r"^material_value: must be non-negative"):
+            load_sequence(with_material(preset("r5"), -1))
+
+    def test_a_scrap_cost_may_recover_the_material_value(self):
+        doc = with_material(preset("r5"), 5)
+        doc["stages"][0]["costs"]["scrap"] = {"initial": -5, "a": -5}
+        assert run(doc)["stages"][0]["costs"]["scrap"] < 0
+        shortcut = with_material(r4_with_costs(R4_SHORTCUT), 5)
+        shortcut["stages"][0]["costs"]["scrap_per_feature"] = {"a": -6, "b": 1}  # a scrapped part: -5
+        assert run(shortcut)["totals"]["scrap_cost"] < 0
+
+    def test_a_scrap_cost_recovering_more_is_rejected_by_field(self):
+        doc = with_material(preset("r5"), 5)
+        doc["stages"][1]["costs"]["scrap"]["b"] = -6
+        with pytest.raises(ValueError) as error:
+            load_sequence(doc)
+        assert str(error.value) == "stages[1].costs.scrap.b: must be at least minus the material_value, -5.0, got -6.0"
+
+        shortcut = r4_with_costs(R4_SHORTCUT)
+        shortcut["stages"][0]["costs"]["scrap_per_feature"] = {"a": -1, "b": 0}
+        with pytest.raises(ValueError) as error:
+            load_sequence(shortcut)
+        assert str(error.value) == ("stages[0].costs.scrap_per_feature: a scrapped part costs their sum, -1.0, "
+                                    "which must be at least minus the material_value, 0.0")

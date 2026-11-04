@@ -106,7 +106,7 @@ The model stores one Mean Setting for each transient state: a vector over that s
 - **A3.** Features that are not reworked stay conforming.
 - **A4.** A rework draw is fresh and comes from the marginal joint distribution of the reworked subset. It does not depend on earlier values or on the kept Features.
 - **A5.** Stages are independent: no correlation across Stages, and no carry-over of the post-rework distribution.
-- **A6.** Costs are deterministic inputs. Scrap Cost is cumulative and entered by the user.
+- **A6.** Costs are deterministic inputs. Scrap Cost is cumulative and entered by the user. (The web app adds a Material Value per part started and makes Scrap Cost the extra cost of scrapping, which may be negative down to minus the Material Value: ADR 0006. At a Material Value of 0, as in every thesis case, nothing here changes.)
 - **A7.** Process Variation is stationary: the same distribution shape and spread for the initial operation and for rework (thesis Assumption 3). Only the Mean Setting may differ between states.
 
 ## 3. MATLAB dependency audit
@@ -343,7 +343,7 @@ Every stage ends with green `pytest` on `test_and_checks/` and one runnable scri
 ## 8. Open unknowns (to resolve inside the named stage)
 
 - **U1 (Stage 2), resolved 2026-10-21:** 2D uses a vectorised port of Genz's BVNU (error 4e-15 per box). 3D integrates the conditional bivariate box by adaptive quadrature (quad's error estimate, typically 1e-14). Both are verified against closed-form orthant probabilities and independent quadrature oracles. SciPy's `multivariate_normal.cdf` was rejected because it is randomised QMC in every dimension. See [ADR 0003](adr/0003-gaussian-box-probability-algorithms.md).
-- **U2 (Stage 1), resolved 2026-10-18:** production cost = PC + Sr + Rw per part started (p. 101: "Production cost is E(PR) − SP f_{I,C}", printed without the sign flip). It is not per conforming part, which would give μ = 10.33. Minimising it reproduces R2 (10.0875) and R4 (46.7530 @ [10.128, 15.181]). Tables 3.11/3.13 report Sr + Rw without PC (D12), so the engine reports PC, Sr and Rw separately and tests compare the matching sum.
+- **U2 (Stage 1), resolved 2026-10-18:** production cost = PC + Sr + Rw per part started (plus the Material Value, ADR 0006, which is 0 in every thesis case) (p. 101: "Production cost is E(PR) − SP f_{I,C}", printed without the sign flip). It is not per conforming part, which would give μ = 10.33. Minimising it reproduces R2 (10.0875) and R4 (46.7530 @ [10.128, 15.181]). Tables 3.11/3.13 report Sr + Rw without PC (D12), so the engine reports PC, Sr and Rw separately and tests compare the matching sum.
 - **U3 (Stage 3), resolved 2026-10-17:** Inspection Cost is a flat IC_stage + IC_feature·N per Stage, summed over the Sequence and subtracted from E(PR) per part started (thesis pp. 108–110: "an inspection process is implicit after each stage… a cost of 0.5 units with a further 0.5 units for each feature inspected"). Table 3.9's I column matches this for Seqs 1–7. Seq 8 is a misprint (D10).
 - **U4 (Stage 4), resolved 2026-10-17:** R6/R7 confirmed visually and reproduced by a throwaway calculation once σ=2 and SP=400 are used (D11).
 - **U5 (Stage 2), resolved 2026-10-17:** R4 and R8 inputs confirmed visually (Tables 3.7, 3.8).

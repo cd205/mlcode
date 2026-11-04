@@ -92,12 +92,16 @@ The cost of a Stage's Operations, incurred by every part that reaches the Stage.
 **Rework Cost**:
 The cost incurred each time a part passes through a given Rework State.
 
+**Material Value**:
+The value of a part's raw material, paid for every part started. A part that conforms recovers it through the Selling Price; a scrapped part loses it.
+
 **Scrap Cost**:
-The cost incurred when a part is scrapped from a given state. It already includes the value added in earlier Stages, so it accumulates along the Sequence.
+The cost incurred when a part is scrapped from a given state, on top of the Material Value and the Processing and Rework Costs the part has already been charged. For a user's own Sequence it is the extra cost of scrapping, such as disposal, and may be negative for material recovered, down to minus the Material Value. In the thesis cases it is cumulative: it includes the value added in earlier Stages, so it accumulates along the Sequence.
+_Avoid_: scrap value
 
 **Inspection Cost**:
 The cost of an Inspection: a fixed amount per Stage plus an amount per inspected Feature.
 
 **Expected Profit**:
-Selling Price times the Final Conformance Probability of the Sequence, minus the expected Processing, Rework and Scrap Costs per part started. Inspection Cost is reported beside it as Expected Profit less Inspection Cost (thesis E(PR) − I); it doesn't depend on the Mean Settings, so both have the same optimum.
+Selling Price times the Final Conformance Probability of the Sequence, minus the Material Value and the expected Processing, Rework and Scrap Costs per part started. Inspection Cost is reported beside it as Expected Profit less Inspection Cost (thesis E(PR) − I); it doesn't depend on the Mean Settings, so both have the same optimum.
 _Avoid_: EP, profit function

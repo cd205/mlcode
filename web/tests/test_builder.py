@@ -176,3 +176,32 @@ def test_download_then_upload_gives_the_same_sequence():
     uploaded = build("b = Builder.upload(b.download());", original)
     assert uploaded == original
     assert evaluate(uploaded) == evaluate(original)
+
+
+# mill and turn in parallel, then drill: with C17's free rework, Optimise ran every mean to its bound (#41).
+MILL_TURN_DRILL = """
+b.setSellingPrice(10);
+b.setFeature(0, 0, "name", "mill");
+b.addOperation("turn");
+b.moveInspection(0, +1);
+b.addOperation("drill");
+b.addInspection();
+"""
+
+
+def test_a_new_sequence_optimises_to_means_near_the_midpoints_not_the_bounds():
+    # C30: with rework at half the Processing Cost, oversizing every part no longer pays.
+    sequence = build(MILL_TURN_DRILL)
+    assert sequence["stages"][1]["costs"]["rework_per_feature"] == {"drill": 1}
+    response = client.post("/api/optimise", json={"sequence": sequence})
+    assert response.status_code == 200, response.json()
+    means = [mu for stage in response.json()["means"]["values"] for mu in stage.values()]
+    assert all(10 < mu < 11 for mu in means), means
+
+
+def test_a_material_value_and_a_scrap_cost_recovering_it_are_accepted():
+    sequence = build(MILL_TURN_DRILL + "b.setMaterialValue(5); b.setStageScrap(1, -5);")
+    assert sequence["material_value"] == 5
+    totals = evaluate(sequence)["totals"]
+    assert totals["material_cost"] == 5
+    assert totals["scrap_cost"] < 0
