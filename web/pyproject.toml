@@ -1,0 +1,36 @@
+[project]
+name = "oms-web"
+version = "0.1.0"
+description = "Local prototype of the OMS sequence web app (manufacturing_oms/docs/web_app_plan.md)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "oms",
+    "uvicorn",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+module-root = ""
+
+[tool.uv.sources]
+oms = { path = "../manufacturing_oms", editable = true }
+
+[dependency-groups]
+dev = [
+    "httpx2",
+    "mypy",
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.mypy]
+files = ["app"]
+strict = true

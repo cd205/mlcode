@@ -28,15 +28,16 @@ class ProfitBreakdown:
     scrap_costs: tuple[float, ...]  # Sr_i · r_i
     rework_costs: tuple[float, ...]  # Rw_i · r_i
     inspection_costs: tuple[float, ...]  # In_i, flat
+    material_cost: float = 0.0  # the Material Value, paid for every part started (ADR 0006)
 
     @property
     def production_cost(self) -> float:
-        """Processing + Scrap + Rework Cost over the whole Sequence (U2)."""
-        return sum(self.processing_costs) + sum(self.scrap_costs) + sum(self.rework_costs)
+        """Material Value + Processing + Scrap + Rework Cost over the whole Sequence (U2, ADR 0006)."""
+        return self.material_cost + sum(self.processing_costs) + sum(self.scrap_costs) + sum(self.rework_costs)
 
     @property
     def expected_profit(self) -> float:
-        """E(PR) = SP · Π_i f_{C,i} − Σ_i (PC_i + Sr_i + Rw_i) · r_i (thesis Eq 3.78)."""
+        """E(PR) = SP · Π_i f_{C,i} − M − Σ_i (PC_i + Sr_i + Rw_i) · r_i (thesis Eq 3.78, with M from ADR 0006)."""
         return self.revenue - self.production_cost
 
     @property
@@ -66,4 +67,5 @@ def evaluate_sequence(sequence: Sequence, means: Seq[MeanSettings], *, rng_seed:
         scrap_costs=tuple(r.expected_scrap_cost * p for r, p in zip(results, reach)),
         rework_costs=tuple(r.expected_rework_cost * p for r, p in zip(results, reach)),
         inspection_costs=tuple(stage.inspection_cost for stage in sequence.stages),
+        material_cost=sequence.material_value,
     )

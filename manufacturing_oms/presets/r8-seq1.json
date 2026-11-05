@@ -1,0 +1,71 @@
+{
+  "format_version": 1,
+  "name": "R8 Seq 1: Table 3.9, Stages f1 | f2 | f3 | f4",
+  "selling_price": 120,
+  "stages": [
+    {
+      "features": [
+        {"name": "f1", "lower": 8, "upper": 12, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1], "corr": 0},
+      "costs": {
+        "processing": 25,
+        "rework": {"f1": 15},
+        "scrap": {"initial": 10, "f1": 10}
+      },
+      "inspection": {"per_stage": 0.5, "per_feature": 0.5}
+    },
+    {
+      "features": [
+        {"name": "f2", "lower": 13, "upper": 17, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1], "corr": 0},
+      "costs": {
+        "processing": 20,
+        "rework": {"f2": 12},
+        "scrap": {"initial": 27, "f2": 27}
+      },
+      "inspection": {"per_stage": 0.5, "per_feature": 0.5}
+    },
+    {
+      "features": [
+        {"name": "f3", "lower": 10, "upper": 14, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1], "corr": 0},
+      "costs": {
+        "processing": 12,
+        "rework": {"f3": 8},
+        "scrap": {"initial": 32, "f3": 32}
+      },
+      "inspection": {"per_stage": 0.5, "per_feature": 0.5}
+    },
+    {
+      "features": [
+        {"name": "f4", "lower": 7, "upper": 11, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1], "corr": 0},
+      "costs": {
+        "processing": 15,
+        "rework": {"f4": 10},
+        "scrap": {"initial": 44, "f4": 44}
+      },
+      "inspection": {"per_stage": 0.5, "per_feature": 0.5}
+    }
+  ],
+  "means": {
+    "scheme": "per_feature",
+    "values": [
+      {"f1": 10.389},
+      {"f2": 15.537},
+      {"f3": 12.667},
+      {"f4": 9.66}
+    ]
+  },
+  "reference": {
+    "source": "Table 3.9",
+    "quantity": "expected_profit",
+    "value": 41.7523,
+    "tolerance": 0.00005,
+    "note": "f3's mean is 12.667, as in Seq 2, where f3's Stage is the same. Table 3.9 prints 12.674, a transposition, which gives 41.7522 (D18). Each Stage's Scrap Cost is cumulative: the Scrap Costs of every Feature made so far (C9). Inspection Cost is 0.5 + 0.5 per Feature after each Stage; the reference is E(PR) before it."
+  }
+}

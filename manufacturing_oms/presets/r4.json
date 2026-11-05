@@ -1,0 +1,28 @@
+{
+  "format_version": 1,
+  "name": "R4: Table 3.7, two Features in parallel",
+  "selling_price": 120,
+  "stages": [
+    {
+      "features": [
+        {"name": "a", "lower": 8, "upper": 12, "rework_side": "upper"},
+        {"name": "b", "lower": 13, "upper": 17, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1, 1], "corr": 0},
+      "costs": {
+        "processing": 45,
+        "rework": {"a": 15, "b": 12, "a+b": 27},
+        "scrap": {"initial": 27, "a": 27, "b": 27, "a+b": 27}
+      },
+      "inspection": {"per_stage": 0, "per_feature": 0}
+    }
+  ],
+  "means": {"scheme": "per_feature", "values": [{"a": 10.537, "b": 15.59}]},
+  "reference": {
+    "source": "Table 3.7",
+    "quantity": "expected_profit",
+    "value": 71.17,
+    "tolerance": 0.005,
+    "note": "Additive costs: reworking both Features costs 15 + 12 = 27, and a scrapped part loses 10 + 17 = 27 from every state."
+  }
+}

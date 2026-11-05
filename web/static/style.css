@@ -1,0 +1,121 @@
+/* Colours as in the notebooks (web_app_plan.md §7): aqua = conform, blue = rework, orange = scrap, grey = processing. */
+:root {
+  --conform: #1baf7a;
+  --rework: #2a78d6;
+  --scrap: #eb6834;
+  --processing: #afb8c1;
+  --ink: #1f2328;
+  --muted: #6e7781;
+  --grid: #d0d7de;
+  --bg: #ffffff;
+  --panel: #f6f8fa;
+  --error-bg: #fff1ec;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  padding: 16px;
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+h1 { margin: 0 0 4px; font-size: 1.4rem; }
+.muted { color: var(--muted); margin: 4px 0 12px; }
+
+main {
+  display: grid;
+  grid-template-columns: minmax(360px, 520px) 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+@media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+
+.panel { background: var(--panel); border: 1px solid var(--grid); border-radius: 8px; padding: 16px; min-width: 0; }
+
+label { display: block; margin-bottom: 12px; font-weight: 600; }
+select, input { display: block; width: 100%; margin-top: 4px; padding: 6px; font: inherit; }
+button { font: inherit; padding: 8px 20px; border: 0; border-radius: 6px; background: var(--ink); color: #fff; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: wait; }
+button.secondary { background: var(--bg); color: var(--ink); border: 1px solid var(--ink); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
+td.num { text-align: right; }
+th.sub { padding-left: 24px; font-weight: 400; color: var(--muted); }
+.file-actions { margin-bottom: 12px; }
+button.secondary { padding: 4px 12px; }
+button.icon { padding: 2px 7px; background: var(--bg); color: var(--ink); border: 1px solid var(--grid); }
+button.icon:disabled, button.secondary:disabled { cursor: default; opacity: 0.35; }
+
+/* The Sequence list (§7.1): one row per Operation or Inspection, its editor opening below it. */
+.seq-list { list-style: none; margin: 0 0 8px; padding: 0; }
+.seq-list .row { background: var(--bg); border: 1px solid var(--grid); border-radius: 6px; margin-bottom: 4px; }
+.seq-list .row.inspection { border-left: 4px solid var(--ink); }
+.row-head { display: flex; align-items: center; gap: 4px; padding: 2px 6px 2px 0; }
+.row-summary { flex: 1; text-align: left; background: none; color: var(--ink); padding: 6px 10px; }
+.row.inspection .row-summary { font-weight: 600; }
+.row.open .row-summary { background: var(--panel); }
+.row-editor { padding: 8px 10px; border-top: 1px solid var(--grid); font-size: 0.9rem; }
+.row-editor input { width: 90px; }
+.row-editor table { font-size: 0.85rem; }
+.row-editor th, .row-editor td { padding: 3px 4px; }
+.row-editor td input { margin: 0; padding: 3px 4px; }
+.seq-list .warning { background: var(--error-bg); border: 1px solid var(--scrap); border-radius: 6px; padding: 4px 10px; margin-bottom: 4px; font-size: 0.85rem; }
+.add-row input.name { width: 140px; margin: 0; }
+.scroll { overflow-x: auto; }
+#sequence-editor > .actions { margin-bottom: 16px; }
+.row-actions { display: flex; gap: 2px; }
+input.auto { font-style: italic; color: var(--muted); }
+label .hint { display: block; font-weight: 400; font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
+label.inline { display: flex; align-items: center; gap: 8px; font-weight: 400; margin-bottom: 6px; }
+label.inline input, label.inline select { width: auto; flex: 1; margin: 0; }
+.costs { border-top: 1px solid var(--grid); margin-top: 8px; padding-top: 8px; }
+.costs .muted { font-size: 0.85rem; margin: 4px 0; }
+#outputs.stale #diagram, #outputs.stale #results { opacity: 0.45; }
+
+/* The sequence chain (C26): drawn from the list on every edit, so never stale. */
+#chain-wrap { overflow-x: auto; margin-bottom: 12px; }
+#chain { width: 100%; height: auto; background: var(--bg); border-radius: 6px; }
+#chain text { font-size: 12px; fill: var(--ink); }
+#chain .label { font-size: 11px; fill: var(--muted); }
+#chain .shape { stroke: var(--ink); stroke-width: 1; }
+#chain .shape.selected { stroke-width: 3; }
+#chain .shape.warn { stroke: var(--scrap); stroke-width: 2; }
+#chain .shape.warn.selected { stroke-width: 3; }
+#chain .bracket path { stroke: var(--muted); }
+#chain .bracket.warn path { stroke: var(--scrap); }
+#chain .bracket.warn text { fill: var(--scrap); font-weight: 600; }
+#chain .chain-item { cursor: pointer; }
+#chain .chain-item:hover .shape { opacity: 0.8; }
+#chain .chain-item:focus { outline: none; }
+#chain .chain-item:focus-visible .shape { stroke: var(--rework); stroke-width: 3; }
+
+#error { background: var(--error-bg); border: 1px solid var(--scrap); border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
+
+#diagram-wrap { position: relative; overflow-x: auto; }
+#diagram { width: 100%; height: auto; background: var(--bg); border-radius: 6px; }
+#diagram text { font-size: 12px; fill: var(--ink); }
+#diagram .label { font-size: 11px; fill: var(--muted); }
+#diagram [data-tip] { cursor: help; }
+#diagram [data-tip]:hover { opacity: 0.8; }
+
+#tooltip {
+  position: absolute;
+  pointer-events: none;
+  white-space: pre;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  max-width: 320px;
+}
+
+#results { margin-top: 16px; background: var(--bg); }
+.ok { color: var(--conform); font-weight: 700; }
+.gap { color: var(--scrap); font-weight: 700; }

@@ -1,0 +1,59 @@
+{
+  "format_version": 1,
+  "name": "R8 Seq 3: Table 3.9, Stages f1 | f2 f3 | f4",
+  "selling_price": 120,
+  "stages": [
+    {
+      "features": [
+        {"name": "f1", "lower": 8, "upper": 12, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1], "corr": 0},
+      "costs": {
+        "processing": 25,
+        "rework": {"f1": 15},
+        "scrap": {"initial": 10, "f1": 10}
+      },
+      "inspection": {"per_stage": 0.5, "per_feature": 0.5}
+    },
+    {
+      "features": [
+        {"name": "f2", "lower": 13, "upper": 17, "rework_side": "upper"},
+        {"name": "f3", "lower": 10, "upper": 14, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1, 1], "corr": 0},
+      "costs": {
+        "processing": 32,
+        "rework": {"f2": 12, "f3": 8, "f2+f3": 20},
+        "scrap": {"initial": 32, "f2": 32, "f3": 32, "f2+f3": 32}
+      },
+      "inspection": {"per_stage": 0.5, "per_feature": 0.5}
+    },
+    {
+      "features": [
+        {"name": "f4", "lower": 7, "upper": 11, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1], "corr": 0},
+      "costs": {
+        "processing": 15,
+        "rework": {"f4": 10},
+        "scrap": {"initial": 44, "f4": 44}
+      },
+      "inspection": {"per_stage": 0.5, "per_feature": 0.5}
+    }
+  ],
+  "means": {
+    "scheme": "per_feature",
+    "values": [
+      {"f1": 10.388},
+      {"f2": 15.57, "f3": 12.666},
+      {"f4": 9.66}
+    ]
+  },
+  "reference": {
+    "source": "Table 3.9",
+    "quantity": "expected_profit",
+    "value": 41.6588,
+    "tolerance": 0.00005,
+    "note": "Each Stage's Scrap Cost is cumulative: the Scrap Costs of every Feature made so far (C9). Inspection Cost is 0.5 + 0.5 per Feature after each Stage; the reference is E(PR) before it."
+  }
+}

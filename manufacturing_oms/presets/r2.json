@@ -1,0 +1,27 @@
+{
+  "format_version": 1,
+  "name": "R2: Table 3.3, one Feature at the profit-optimal mean",
+  "selling_price": 120,
+  "stages": [
+    {
+      "features": [
+        {"name": "x", "lower": 8, "upper": 12, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1], "corr": 0},
+      "costs": {
+        "processing": 25,
+        "rework": {"x": 10},
+        "scrap": {"initial": 15, "x": 15}
+      },
+      "inspection": {"per_stage": 0, "per_feature": 0}
+    }
+  ],
+  "means": {"scheme": "per_feature", "values": [{"x": 10.61}]},
+  "reference": {
+    "source": "Table 3.3 μ* = 10.61, E(PR) by closed form",
+    "quantity": "expected_profit",
+    "value": 93.4377,
+    "tolerance": 0.00005,
+    "note": "The thesis prints only the optimum mean (10.61 for profit, 10.09 for minimum production cost), not the Expected Profit. 93.4377 is SP f_C - PC - Sr - Rw at 10.61 from the closed form for one Feature (docs/prechecks/r2_table_3_3.py), not from the engine. The printed means themselves are checked by Optimise."
+  }
+}

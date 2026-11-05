@@ -1,0 +1,27 @@
+{
+  "format_version": 1,
+  "name": "R1: Fig 3.12/3.14, one Feature with a rework loop",
+  "selling_price": 0,
+  "stages": [
+    {
+      "features": [
+        {"name": "x", "lower": 3, "upper": 7, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1], "corr": 0},
+      "costs": {
+        "processing": 0,
+        "rework": {"x": 0},
+        "scrap": {"initial": 0, "x": 0}
+      },
+      "inspection": {"per_stage": 0, "per_feature": 0}
+    }
+  ],
+  "means": {"scheme": "per_feature", "values": [{"x": 5}]},
+  "reference": {
+    "source": "Fig 3.12",
+    "quantity": "final_conformance",
+    "value": 0.97672,
+    "tolerance": 0.000005,
+    "note": "Probabilities only, so Selling Price and costs are 0 (C14). The figure prints 0.9767; 0.97672 is the spec pre-check value."
+  }
+}

@@ -1,7 +1,8 @@
 # OMS Web App: Prototype Plan
 
-Status: **approved 2026-10-27** (W0 done in a grilling session). Nothing in this plan is built yet. Work through
-W1–W4 in order. Each stage ends with green `uv run pytest` and something you can run.
+Status: **approved 2026-10-27** (W0 done in a grilling session). Sequence list builder (C19–C26, §7.1, spec #35, tickets #36–#40)
+**approved 2026-11-02** in a second grilling session. Nothing in this plan is built yet. Work through
+the §8 tickets (#23–#33), blockers first. Each ticket ends with green `uv run pytest` and something you can run.
 
 This plan builds on:
 - [GLOSSARY.md](../GLOSSARY.md): use the terms exactly as defined (Stage, Feature, Parallel, Serial, Rework
@@ -38,7 +39,7 @@ prototype has been used.
 | C6 | The format lives in **`oms.formats`** (`load_sequence`, `dump_sequence`, `run`); presets in `manufacturing_oms/presets/`; the web app in `web/` as its own uv project. | "spec" already means `docs/spec.md` and Specification Limits. The engine gains no web dependencies. |
 | C7 | **State keys** are `"initial"` and Feature names joined by `+` (`"a+b"`). Feature names match `[A-Za-z0-9_]{1,16}`. Parsing ignores order; writing uses Feature order. | Readable, and the name rule means `+` can't clash. |
 | C8 | A Stage's `costs` take **either** `rework_per_feature` + `scrap_per_feature` (→ `CostTable.additive`) **or** the full state tables, never both. `dump_sequence` always writes full tables. | Users needn't type a cost for every state; dumped files are explicit. |
-| C9 | **Scrap Cost is stored cumulative**, as the glossary defines it. The builder labels the field "Scrap Cost (includes value added in earlier Stages)" and shows the earlier Stages' Processing Costs as a hint; it never adds them up silently. | Keeps the modelling choice visible (ADR 0001, A6). |
+| C9 | *(Superseded by C28 in the builder.)* **Scrap Cost is stored cumulative**, as the glossary defines it. The builder labels the field "Scrap Cost (includes value added in earlier Stages)" and shows the earlier Stages' Processing Costs as a hint; it never adds them up silently. | Keeps the modelling choice visible (ADR 0001, A6). |
 | C10 | `means.scheme` is any of `per_feature` / `per_group_size` / `per_state`, and *Optimise* uses it. The builder edits `per_feature` values only. A preset with another scheme shows its means read-only until the user optimises or switches to `per_feature`. | Presets R6, R7 and R9 need the other schemes; the builder stays simple. |
 | C11 | The builder offers **Normal variation only**: one σ per Feature and a scalar correlation per Stage. A correlation matrix, or `gaussian_copula` variation, comes only through preset or uploaded JSON and shows read-only. Copula marginals are limited to an allow-list of SciPy names. | R9 still runs; the builder stays simple; no arbitrary SciPy names. |
 | C12 | **N parts** scales expected counts: per-Pass counts are N · probabilities, returned as floats and rounded only for display. No Monte Carlo in the results. | Matches Fig 3.14 and keeps results exact. |
@@ -46,8 +47,21 @@ prototype has been used.
 | C14 | **Economics are always required.** R1 (probabilities only) uses Selling Price and costs of 0. `reference` names the quantity it checks (`expected_profit`, `final_conformance`, `production_cost`) and also carries a `tolerance` (from the printed precision) and an optional `note` (e.g. discrepancy D1, D10). The UI and the W1 tests use the same tolerance. | One source of truth for "engine vs thesis". |
 | C15 | **Optimise** takes only `objective` (`expected_profit` \| `production_cost`). Bounds, `n_starts` = 8 and seed = 0 are the engine defaults. The response echoes the full optimiser record (method, bounds, starts, evaluations, success). | Small surface for v1; more options can follow W4. |
 | C16 | After *Optimise*, the optimised Mean Settings **replace** the sequence's `means` (same scheme). The previous means are kept in one undo slot. | *Evaluate* and *Download* then use what was just found. |
-| C17 | **Builder defaults** for a new Feature: next unused name `f1`, `f2`, …; L=8, U=12; Rework Side `upper`; σ=1; rework and scrap cost 0; Mean Setting (L+U)/2, which follows L and U until the user types a mean. | *Evaluate* works straight after *Add Feature*. |
+| C17 | **Builder defaults** for a new Feature: next unused name `f1`, `f2`, …; L=8, U=12; Rework Side `upper`; σ=1; rework and scrap cost 0 (Rework Cost now nominal, C30; Scrap Cost the extra cost of scrapping, C28); Mean Setting (L+U)/2, which follows L and U until the user types a mean. | *Evaluate* works straight after *Add Feature*. |
 | C18 | Engine `ValueError`s return **422** with their message, the same as schema errors. Any other exception returns a 500 with a generic message, and the traceback goes only to the server log. | Readable errors; no code leaks (ADR 0005). |
+| C19 | The builder is a flat **Sequence list** of Operations and Inspections (GLOSSARY: Sequence); Stages are derived as "the Operations up to and including each Inspection". It replaces the Stage cards. The sequence JSON stays Stage-based (C2). | Matches how users think about a process: Inspection after every Operation is Serial, several Operations before one Inspection is Parallel. |
+| C20 | One **Operation is one Feature** (GLOSSARY). Its name is the Feature name; the name box suggests `turn`, `drill`, `mill`, `bore`, `grind`; a repeated name defaults to `drill2`, etc. No separate "kind" field. | Maps straight onto the engine. Operations making several Features can come later. |
+| C21 | A Sequence list is **valid** only if it ends with an Inspection, has no two Inspections in a row, at most 4 Operations per Stage and at most 6 Inspections. An invalid list shows a warning and disables *Evaluate* and *Optimise*; the builder never fixes it silently. | The engine needs every Stage to end in an Inspection; limits match §6. |
+| C22 | Features gain an optional **`processing`** cost. When every Feature of a Stage has one, the Stage's `costs.processing` is their sum (it may be omitted; if given, it must match to 1e-9, else 422). Some but not all Features having one is a 422. `dump_sequence` writes both. `format_version` stays 1. | Each Operation has its own cost; old files still load; the engine is unchanged. |
+| C23 | A new Operation's Processing Cost is **nominal**: turn 3, drill 2, mill 4, bore 3, grind 5, otherwise 1. It follows the name until the user types a cost (like the Mean Setting in C17). | *Evaluate* works straight away with plausible costs. Placeholder values. |
+| C24 | A preset's Stage Processing Cost is **split evenly** across its Operations when loaded, with a note on the Inspection row. Preset files are unchanged. | Sums, and so all results and reference checks, are unchanged. |
+| C25 | *(Superseded by C28 for builder sequences.)* Moving rows keeps C9: Scrap Costs are never adjusted. When earlier Stages' Processing Costs change, the Inspection row's hint updates and its Scrap Cost fields get an amber "check" marker until edited. | Cumulative Scrap Cost stays a visible modelling choice. |
+| C26 | A **sequence chain** diagram sits above the OMS diagram: Operation boxes, Inspection diamonds, and a "Stage n · Serial/Parallel" bracket under each Stage. It redraws on every edit in the browser; clicking an item selects its row. | Shows how Operations and Inspections become Stages, without calling the server. |
+| C27 | A sequence may give a **`material_value`** (optional, default 0, non-negative): the value of the part's raw material, paid for every part started. A sold part recovers it through the Selling Price; a scrapped part loses it. Expected Profit = SP · Final Conformance − Material Value − Σ (Processing + Rework + Scrap) · r_i; production cost includes it. `dump_sequence` writes it only when it is not 0; `format_version` stays 1. | Material is part of the full cost of a part. At 0, every preset and thesis result is unchanged. Being the same at any Mean Setting, it never moves the optimum. |
+| C28 | In sequences made in the builder, **Scrap Cost is the extra cost of scrapping** (disposal, say), nominally 0, because a scrapped part has already been charged its Material Value and the Processing and Rework Costs it incurred. It may be negative, for material recovered, down to −Material Value; the engine refuses anything lower. The Inspection editor says what a scrapped part already loses. The presets keep the thesis convention, cumulative Scrap Costs (A6), so their reference checks hold. Supersedes C25's "check" marker and C9's hint of earlier Processing Costs, which were for cumulative Scrap Costs. | Counting the value lost again in the Scrap Cost charges it twice. A recovery of more than the material would make scrapping pay. |
+| C29 | In the per-Feature shortcut a Stage has **one Scrap Cost**, not one per Feature: a scrapped part costs the same whichever Feature failed. It is stored on the Stage's first Feature (others 0), as switching from a full table already does, and stays with the Stage when Operations move. The full table, by state, still allows a Scrap Cost per state. | Matches `CostTable.additive`, where a scrapped part costs the sum of the per-Feature Scrap Costs. |
+| C30 | A new Operation's **Rework Cost is nominal: ½ its Processing Cost**, and follows it until the user types a cost (like C17, C23); a Rework State of several Features costs their sum. Switching the Stage to the full table keeps the values and ends the following. Replaces C17's Rework Cost of 0. | Free rework makes oversizing every part optimal, so *Optimise* ran each mean to its bound. Rework usually costs less than doing the Operation. |
+| C31 | In the builder a new sequence's **Selling Price is 100**, and it can't be set to 0 or less. The engine and the format still accept 0, which R1's preset uses (C14). | With a Selling Price of 0 every part loses money, and Optimise has nothing to aim for. |
 
 Privacy in practice: the GitHub repo `cd205/mlcode` must stay private (or `oms` moves to a private package if the
 web code is ever made public); API errors never return Python tracebacks.
@@ -97,14 +111,17 @@ R4 (one Parallel Stage, two Features), with full cost tables (C8):
 
 R5 (two Serial Stages) is the same shape with two entries in `stages`, one Feature each.
 
-- **Features**: names match `[A-Za-z0-9_]{1,16}` and are unique across the Sequence; `rework_side` is
-  `upper`, `lower` or `none` (C7).
+- **Features**: names match `[A-Za-z0-9_]{1,16}`, are not `initial` (the Initial State's key) and are unique across
+  the Sequence; `rework_side` is `upper`, `lower` or `none` (C7).
 - **States**: `"initial"` and `+`-joined Feature names; parsing ignores order (C7).
-- **Costs**: full tables as above, or `{"processing", "rework_per_feature", "scrap_per_feature"}`; Scrap Costs
-  are cumulative (C8, C9).
+- **Costs**: full tables as above, or `{"processing", "rework_per_feature", "scrap_per_feature"}`. The presets'
+  Scrap Costs are cumulative (C8, C9); the builder's are the extra cost of scrapping, which may be negative
+  down to −`material_value` (C28). Features may carry `processing`, the Operation's Processing Cost; then the Stage's
+  `processing` is their sum (C22).
 - **Variation**: `normal` (sigmas, corr scalar or matrix) or `gaussian_copula` (marginals by allow-listed SciPy
   name and parameters, centred on 0 as in ADR 0004, plus corr) (C11).
 - **Means**: `scheme` plus one entry per Stage, in the shape that scheme needs (C10).
+- **`material_value`**: optional, default 0; paid for every part started (C27).
 - **`reference`**: optional; `source`, `quantity`, `value`, `tolerance`, optional `note` (C14).
 
 ## 5. Results format and per-Pass counts
@@ -112,11 +129,12 @@ R5 (two Serial Stages) is the same shape with two entries in `stages`, one Featu
 `oms.formats.run(sequence_json, action="evaluate" | "optimise", objective=..., n_parts=10000)` returns JSON with:
 
 - the Mean Settings used (optimised or given), and for *Optimise* the optimiser record (C15);
-- the Sequence totals from `ProfitBreakdown`: Expected Profit, revenue, Final Conformance, processing, scrap,
-  rework and Inspection Costs, production cost;
+- the Sequence totals from `ProfitBreakdown`: Expected Profit, revenue, Final Conformance, material, processing,
+  scrap, rework and Inspection Costs, production cost (C27);
 - for each Stage: Reach Probability, `final_conformance`, `scrap_probability`, `visits` by state, the
   transition probabilities from each state, and the **per-Pass counts** below;
-- the reference check when the sequence has a `reference` (C14).
+- the reference check when the sequence has a `reference` (C14), for *Evaluate* only: the reference is for the
+  given means, not the optimised ones.
 
 **Per-Pass counts** (what the thesis bars show; expected counts, C12). For Stage i, start with
 v₁ = {initial: N · rᵢ} parts, where rᵢ is the Reach Probability. For Pass k = 1, 2, …:
@@ -162,34 +180,69 @@ outgrows it):
 - **Diagram**: Stages left to right, joined by the conforming flow; for a multi-Feature Stage, one Rework box per
   Rework State (Fig 3.5); for a single Feature, a rework loop (Fig 3.12); Conform and Scrap sinks; per-Pass bars
   beside each Stage. Colours as in the notebooks: aqua = conform, blue = rework, orange = scrap, grey =
-  processing. Hover shows counts and probabilities.
+  processing. Hover shows counts and probabilities. More than 3 Rework States (up to 15 for 4 Features) are
+  drawn as compact boxes; the diagram is never scaled above 1:1 or below 0.75, and scrolls sideways past that.
 - The edited sequence can be downloaded and uploaded as JSON.
+- Builder rules (#31): an edit drops the preset's `reference` (it is no longer the thesis case) and empties the
+  undo slot; *Optimise* and *Undo* keep it. A Feature moved past the end of its Stage goes into the neighbouring
+  Stage. Changing Features keeps the cost tables in step: a new Feature costs 0 (C17), and a new Rework State in a
+  full table costs the sum of its Features' Rework Costs, with the Initial State's Scrap Cost. A full table can
+  switch to the per-Feature shortcut only when it is additive. While a Stage's variation or the means scheme is
+  preset-only, its Features can't be added, removed or moved, nor (for a scheme) their Rework Sides
+  changed; a Stage with preset-only variation can still be moved or deleted. Switching a scheme to `per_feature` is left to #28.
+
+### 7.1 Sequence list builder (W3b, 2026-11-02)
+
+Replaces the Stage cards in the left panel (C19–C26). The side-by-side layout stays: builder left, diagrams and
+results right.
+
+- **Rows.** An Operation row shows name, L–U and Mean Setting; an Inspection row shows "Inspection · Stage n ·
+  Serial/Parallel". Clicking a row expands its editor inline, one at a time.
+- **Operation editor:** name (suggestions, C20), L, U, Rework Side, σ, Mean Setting, Processing Cost (nominal
+  default, C23).
+- **Inspection editor:** correlation, Rework Cost per Feature (nominal, C30) and one Scrap Cost for the Stage
+  (C29), or the full table (C8); Inspection Cost (per Stage, per Feature); what a scrapped part already loses
+  (C28); the even-split note for presets (C24).
+- **Selling Price**, 100 for a new sequence and never set to 0 (C31); **Material Value** beside it (C27).
+- **Editing.** *Add Operation* and *Add Inspection* append to the end; ↑ ↓ ✕ move or delete a row. An
+  Operation moved past an Inspection moves its Feature into the neighbouring Stage, under the §7 cost rules.
+  Moving an Inspection moves several Features at once, under the same rules. Deleting an Inspection merges its
+  Stage into the next, and is refused with a message if that Stage would have more than 4 Operations.
+  Preset-only locks apply: Operations of a locked Stage can't move, nor can its Inspection.
+- **Validity** (C21): warnings in the list; *Evaluate* and *Optimise* disabled until it is valid.
+- **Sequence chain** (C26) at the top of the right panel, above the OMS diagram.
 
 ## 8. Staged plan
 
 **W0: Agree the open decisions (no code).** *Done 2026-10-27*: §2 C6–C18, ADR 0005, and the glossary term Pass.
 
-**W1: Sequence format, presets and results (`oms.formats`).**
-- Parse and validate the format into `Sequence` + `MeanSettings`; serialise back (round-trip).
-- `run()` returning the §5 results, including per-Pass counts.
-- The C13 presets with their thesis references.
-- *Exit:* tests that every preset reproduces its reference within its tolerance through `run()`; round-trip
-  tests; R1 per-Pass counts match Fig 3.14; per-Pass sums close on R1–R8.
-- *Example:* a notebook cell or script that loads a preset and prints the results.
+**W1–W4: the prototype, as vertical-slice tickets.** Each ticket cuts through the format, `run()`, the API and
+the page, so it can be shown working on its own. The acceptance criteria are in the issues. The format grows
+ticket by ticket; together the tickets cover every preset (C13) and every §5–§7 item.
 
-**W2: FastAPI backend (`web/`).**
-- The §6 endpoints, request checks and limits.
-- *Exit:* API tests with FastAPI's test client (every preset through `/api/evaluate`; a malformed request gives
-  a 422 with a readable message and no traceback). `uv run uvicorn app.main:app` serves it locally.
+| Issue | Ticket | Blocked by |
+|---|---|---|
+| #23 | 1a: sequence format, `run()` and per-Pass counts for R1 (tests and an example script, no web) | – |
+| #24 | 1b: R1 in the browser: `web/`, presets and evaluate endpoints, page, diagram, errors (C18) | #23 |
+| #25 | 2: Serial Sequences (R2, R5); multi-Stage diagram | #24 |
+| #26 | 3: Parallel Stages and Rework States (R3, R4); state keys, cost shortcut | #24 |
+| #27 | 4: Optimise Mean Settings, with undo | #24 |
+| #28 | 5: other tying schemes (R6, R7: 6 presets); read-only means | #26, #27 |
+| #29 | 6: R8 Inspection placements (8 presets) | #26 |
+| #30 | 7: copula Process Variation (R9) | #28 |
+| #31 | 8: builder editing; download and upload | #26 |
+| #32 | 9: request limits and timing (W-U4) | #27, #29 |
+| #36 | 11: per-Operation Processing Cost in the sequence format (C22) | – |
+| #37 | 12: Sequence list editor: rows, adding, validity (C19–C21) | – |
+| #38 | 13: Processing Cost on each Operation; even split; Scrap Cost "check" marker (C23–C25) | #36, #37 |
+| #39 | 14: moves that change Stages | #38 |
+| #40 | 15: sequence chain diagram (C26) | #37 |
+| #41 | 16: Material Value; nominal Rework Cost; Scrap Cost as the extra cost of scrapping (C27–C30) | #40 |
+| #33 | 10: prototype review (human), with W-U1 | #25, #28–#32, #36–#40, #41 |
 
-**W3: Builder page.**
-- The §7 page served from `/`.
-- *Exit:* in a browser, load each preset, evaluate and optimise it, add and remove Stages and Features, and see
-  the diagram update. R1's diagram shows the Fig 3.14 numbers.
+Tickets 11–16 are sub-issues of the spec #35.
 
-**W4: Prototype review.**
-- Use it, list what's missing, decide whether to go on to hosting and whether a frontend framework is needed.
-- *Exit:* a short list of follow-up issues.
+These replace the earlier layer-by-layer issues #18–#21.
 
 **W5 (later, own plan): hosting.**
 - Long jobs (`search_sequences`, copula Monte Carlo) run in a background job queue that the page polls.
@@ -200,9 +253,9 @@ outgrows it):
 
 ## 9. Open unknowns
 
-- **W-U1 (W1):** the inputs behind Figs 3.15 and 3.16 (the second Stage's Feature, and the two-Feature case with
+- **W-U1 (#33):** the inputs behind Figs 3.15 and 3.16 (the second Stage's Feature, and the two-Feature case with
   C^I = 6449), so those diagrams can also be checked.
-- **W-U4 (W2):** request time limit and size limits; measure `optimise_means` on the largest allowed sequence.
+- **W-U4 (#32):** request time limit and size limits; measure `optimise_means` on the largest allowed sequence.
 
 Resolved at W0: W-U2 (C10), W-U3 (C11, C13), W-U5 (C7).
 
@@ -210,4 +263,4 @@ Resolved at W0: W-U2 (C10), W-U3 (C11, C13), W-U5 (C7).
 
 1. Read `GLOSSARY.md`, `docs/spec.md` §2, §5 and §6, ADR 0005, and this document.
 2. Run `uv run pytest` in `manufacturing_oms/` to confirm a green baseline.
-3. Start the next unfinished stage (W1 first).
+3. Pick the next ticket from §8 whose blockers are all closed (#23 first).

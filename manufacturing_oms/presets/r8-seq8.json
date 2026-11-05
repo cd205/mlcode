@@ -1,0 +1,35 @@
+{
+  "format_version": 1,
+  "name": "R8 Seq 8: Table 3.9, Stages f1 f2 f3 f4",
+  "selling_price": 120,
+  "stages": [
+    {
+      "features": [
+        {"name": "f1", "lower": 8, "upper": 12, "rework_side": "upper"},
+        {"name": "f2", "lower": 13, "upper": 17, "rework_side": "upper"},
+        {"name": "f3", "lower": 10, "upper": 14, "rework_side": "upper"},
+        {"name": "f4", "lower": 7, "upper": 11, "rework_side": "upper"}
+      ],
+      "variation": {"type": "normal", "sigmas": [1, 1, 1, 1], "corr": 0},
+      "costs": {
+        "processing": 72,
+        "rework": {"f1": 15, "f2": 12, "f3": 8, "f4": 10, "f1+f2": 27, "f1+f3": 23, "f1+f4": 25, "f2+f3": 20, "f2+f4": 22, "f3+f4": 18, "f1+f2+f3": 35, "f1+f2+f4": 37, "f1+f3+f4": 33, "f2+f3+f4": 30, "f1+f2+f3+f4": 45},
+        "scrap": {"initial": 44, "f1": 44, "f2": 44, "f3": 44, "f4": 44, "f1+f2": 44, "f1+f3": 44, "f1+f4": 44, "f2+f3": 44, "f2+f4": 44, "f3+f4": 44, "f1+f2+f3": 44, "f1+f2+f4": 44, "f1+f3+f4": 44, "f2+f3+f4": 44, "f1+f2+f3+f4": 44}
+      },
+      "inspection": {"per_stage": 0.5, "per_feature": 0.5}
+    }
+  ],
+  "means": {
+    "scheme": "per_feature",
+    "values": [
+      {"f1": 10.56, "f2": 15.613, "f3": 12.708, "f4": 9.656}
+    ]
+  },
+  "reference": {
+    "source": "Table 3.9",
+    "quantity": "expected_profit",
+    "value": 40.8657,
+    "tolerance": 0.0003,
+    "note": "The thesis's Eq 3.59 undercounts scrap in a Stage of 3 or more Features, so the engine is lower than the printed E(PR) by about 2e-4; the tolerance allows for it (D1, ADR 0001). Table 3.9 prints E(PR) − I 0.5 too high for this Sequence (D10b). Table 3.9 prints I = 3; one Stage of 4 Features gives 0.5 + 4 × 0.5 = 2.5 (D10a). The printed f4 mean is a little off the optimum (D19). Each Stage's Scrap Cost is cumulative: the Scrap Costs of every Feature made so far (C9). Inspection Cost is 0.5 + 0.5 per Feature after each Stage; the reference is E(PR) before it."
+  }
+}
