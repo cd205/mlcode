@@ -65,6 +65,16 @@ function numberInput(get, set, className = "") {
   return bind(el("input", { type: "number", step: "any", className }), get, set);
 }
 
+// Marks a cost field red while it is 0: allowed, but usually a cost left out.
+function flagZero(input, get, label) {
+  bindings.push(() => {
+    const zero = get() === 0;
+    input.classList.toggle("zero", zero);
+    if (zero) input.title = `${label} is 0`;
+  });
+  return input;
+}
+
 // Text that follows the sequence, e.g. a hint.
 function live(node, get) {
   bindings.push(() => { node.textContent = get(); });
@@ -138,8 +148,9 @@ function renderEditor() {
   }
   const problems = b.problems;
   const list = el("ol", { className: "seq-list" });
+  let operations = 0;  // Operation rows alternate shades
   b.rows.forEach((r, k) => {
-    list.append(r.kind === "operation" ? operationRow(r) : inspectionRow(r));
+    list.append(r.kind === "operation" ? operationRow(r, operations++ % 2) : inspectionRow(r));
     for (const p of problems.filter((p) => p.row === k)) {
       list.append(el("li", { className: "warning", role: "status" }, p.message));
     }
@@ -172,7 +183,7 @@ function listRow(key, className, summary, buttons, editor) {
   return item;
 }
 
-function operationRow(r) {
+function operationRow(r, shade) {
   const b = builder;
   const { stage: i, index: j, name } = r;
   const structure = b.meansEditable && b.variationEditable(i);
@@ -181,7 +192,7 @@ function operationRow(r) {
     const mu = b.document.means.values[i]?.[f.name];
     return `${f.name} · ${f.lower}–${f.upper} · μ ${typeof mu === "number" ? fmtMean(mu) : "–"}`;
   });
-  return listRow(rowKey(r), "operation", summary, [
+  return listRow(rowKey(r), `operation shade-${shade}`, summary, [
     iconButton("↑", `Move ${name} up`, () => b.moveOperation(i, j, -1), !r.canMoveUp),
     iconButton("↓", `Move ${name} down`, () => b.moveOperation(i, j, +1), !r.canMoveDown),
     iconButton("✕", `Delete ${name}`, () => b.deleteOperation(i, j), !structure),
@@ -215,7 +226,7 @@ function operationEditor(i, j, name) {
     processing.classList.toggle("auto", auto);
     processing.title = auto ? "A nominal cost for the Operation's name until you type a cost" : "";
   });
-  field("Processing Cost", processing);
+  field("Processing Cost", flagZero(processing, () => feature().processing, "Processing Cost"));
   const mu = () => b.document.means.values[i]?.[name];
   if (b.meansEditable) {
     const mean = numberInput(() => fmtMean(mu()), (v) => b.setMean(i, name, v), "mean");
@@ -291,7 +302,7 @@ function costEditor(i) {
   const stageCosts = () => b.document.stages[i].costs;
   const table = el("table", { className: "cost-table" });
   table.createTHead().innerHTML = shortcut ? "<tr><th>Feature</th><th>Rework Cost</th></tr>"
-    : "<tr><th>State</th><th>Rework Cost</th><th>Scrap Cost (extra)</th></tr>";
+    : "<tr><th>State</th><th>Rework Cost</th><th>Scrap Cost (extra)</th><th>Lost on scrap</th></tr>";
   const body = table.createTBody();
   const keys = Object.keys(shortcut ? costs.rework_per_feature : costs.scrap);
   for (const key of keys) {
@@ -301,6 +312,8 @@ function costEditor(i) {
     tr.insertCell().append(key in costs[reworkTable] ? reworkInput(i, reworkTable, key) : "–");
     if (!shortcut) {
       tr.insertCell().append(numberInput(() => stageCosts().scrap[key], (v) => b.setCost(i, "scrap", key, v)));
+      tr.insertCell().append(live(el("span", { className: "computed" }),
+        () => fmtMean(b.lostOnScrap(i).total + stageCosts().scrap[key])));
     }
   }
   if (keys.length) wrap.append(el("div", { className: "scroll" }, table));
@@ -311,6 +324,11 @@ function costEditor(i) {
   if (shortcut && b.document.stages[i].features.length) {
     wrap.append(el("label", { className: "inline" }, "Scrap Cost (extra)",
       numberInput(() => b.stageScrap(i), (v) => b.setStageScrap(i, v))));
+    wrap.append(live(el("p", { className: "computed" }), () => {
+      const { total } = b.lostOnScrap(i);
+      return `Lost on scrap here: ${fmtMean(total)} already lost + ${fmtMean(b.stageScrap(i))} Scrap Cost = ` +
+        `${fmtMean(total + b.stageScrap(i))}, plus any Rework Costs`;
+    }));
   }
   wrap.append(live(el("p", { className: "muted" }), () => {
     const { material, processing, total } = b.lostOnScrap(i);
@@ -331,7 +349,7 @@ function reworkInput(i, table, key) {
     input.classList.toggle("auto", auto);
     input.title = auto ? "Half the Operation's Processing Cost until you type a cost" : "";
   });
-  return input;
+  return flagZero(input, () => b.document.stages[i].costs[table][key], "Rework Cost");
 }
 
 function showResults(results) {
@@ -437,6 +455,7 @@ async function submit(action) {
   showError(null);
   busy = true;
   updateActions();
+  const stopStatus = showStatus(action, submitted);
   try {
     const body = { sequence: submitted, n_parts: Number($("n-parts").value) };
     if (action === "optimise") body.objective = $("objective").value;
@@ -457,9 +476,32 @@ async function submit(action) {
   } catch (e) {
     showError(e.message);
   } finally {
+    stopStatus();
     busy = false;
     updateActions();
   }
+}
+
+// "Optimising… 0:42" while a request runs, so a slow one doesn't look stuck. Returns the function that clears it.
+function showStatus(action, sequence) {
+  const status = $("status");
+  const verb = action === "optimise" ? "Optimising" : "Evaluating";
+  // Correlated Features need a numerical integral per evaluation, slow from three up (ADR 0003).
+  const slow = action === "optimise" && sequence.stages.some((s) => s.features.length >= 3 &&
+    (Array.isArray(s.variation.corr) || (s.variation.corr ?? 0) !== 0 || s.variation.type !== "normal"));
+  const note = slow ? " A Stage with three or more correlated Operations can take a while." : "";
+  const started = Date.now();
+  const tick = () => {
+    const s = Math.floor((Date.now() - started) / 1000);
+    status.textContent = `${verb}… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}.${note}`;
+  };
+  tick();
+  status.hidden = false;
+  const timer = setInterval(tick, 1000);
+  return () => {
+    clearInterval(timer);
+    status.hidden = true;
+  };
 }
 
 function undo() {
@@ -495,6 +537,7 @@ async function init() {
       option.dataset.description = p.description;
       $("preset").add(option);
     }
+    if (presets.some((p) => p.id === "r2")) $("preset").value = "r2";  // r1's costs are all 0
     if (presets.length) $("preset").dispatchEvent(new Event("change"));
     else openOwn(Builder.blank());
   } catch (e) {

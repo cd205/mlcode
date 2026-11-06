@@ -55,16 +55,21 @@ button.icon:disabled, button.secondary:disabled { cursor: default; opacity: 0.35
 /* The Sequence list (§7.1): one row per Operation or Inspection, its editor opening below it. */
 .seq-list { list-style: none; margin: 0 0 8px; padding: 0; }
 .seq-list .row { background: var(--bg); border: 1px solid var(--grid); border-radius: 6px; margin-bottom: 4px; }
-.seq-list .row.inspection { border-left: 4px solid var(--ink); }
+/* Inspections light blue; Operation rows alternate light greys, so rows stand apart. */
+.seq-list .row.shade-0 { background: #eceff2; }
+.seq-list .row.shade-1 { background: #dce1e6; }
+.seq-list .row.inspection { border-left: 4px solid var(--ink); background: #c9def5; }
 .row-head { display: flex; align-items: center; gap: 4px; padding: 2px 6px 2px 0; }
 .row-summary { flex: 1; text-align: left; background: none; color: var(--ink); padding: 6px 10px; }
 .row.inspection .row-summary { font-weight: 600; }
-.row.open .row-summary { background: var(--panel); }
+.row.open .row-summary { background: rgba(31, 35, 40, 0.06); }
 .row-editor { padding: 8px 10px; border-top: 1px solid var(--grid); font-size: 0.9rem; }
 .row-editor input { width: 90px; }
 .row-editor table { font-size: 0.85rem; }
 .row-editor th, .row-editor td { padding: 3px 4px; }
 .row-editor td input { margin: 0; padding: 3px 4px; }
+.row-editor input.zero { border-color: var(--scrap); background: var(--error-bg); color: #b3261e; }
+.computed { font-weight: 600; margin: 4px 0; }
 .seq-list .warning { background: var(--error-bg); border: 1px solid var(--scrap); border-radius: 6px; padding: 4px 10px; margin-bottom: 4px; font-size: 0.85rem; }
 .add-row input.name { width: 140px; margin: 0; }
 .scroll { overflow-x: auto; }
@@ -94,6 +99,8 @@ label.inline input, label.inline select { width: auto; flex: 1; margin: 0; }
 #chain .chain-item:hover .shape { opacity: 0.8; }
 #chain .chain-item:focus { outline: none; }
 #chain .chain-item:focus-visible .shape { stroke: var(--rework); stroke-width: 3; }
+
+#status { margin: 8px 0 0; padding: 6px 10px; border-radius: 6px; background: #c9def5; font-size: 0.9rem; }
 
 #error { background: var(--error-bg); border: 1px solid var(--scrap); border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
 
