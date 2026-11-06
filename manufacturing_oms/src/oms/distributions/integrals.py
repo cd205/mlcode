@@ -1,7 +1,8 @@
 """Box probabilities of a standard (zero-mean, unit-variance) correlated Normal (ADR 0003).
 
 - 2 dimensions: Genz's BVNU (Drezner & Wesolowsky 1990, as revised by Genz 2004), deterministic Gauss–Legendre.
-- 3 dimensions: adaptive quadrature over one variable of the conditional bivariate box.
+- 3 dimensions: composite Gauss–Legendre over one variable of the conditional bivariate box, adaptive
+  quadrature where that rule's error estimate is too large.
 - 4 or more: randomised quasi-Monte Carlo (Genz's separation of variables on scrambled Sobol points).
 """
 
@@ -112,14 +113,21 @@ def _bvnu_finite(h: np.ndarray, k: np.ndarray, r: float) -> np.ndarray:
 # Beyond ±TRUNCATION the outer variable carries less than 2Φ(−12) ≈ 3.6e-33 of probability.
 _TRUNCATION = 12.0
 _QUAD_ABS_TOL = 1e-13
+# The fixed rule: 6 equal panels of 24-point Gauss–Legendre, checked against 12 points on the same panels.
+_PANELS = 6
+_RULE, _CHECK = np.polynomial.legendre.leggauss(24), np.polynomial.legendre.leggauss(12)
+_FIXED_RULE_TOL = 1e-11  # above this estimated error, fall back to adaptive quadrature
 
 
 def trivariate_box(a: np.ndarray, b: np.ndarray, corr: np.ndarray) -> Probability:
     """P(a < Z < b) for a standard trivariate Normal whose correlations are all strictly inside (−1, 1).
 
     Conditions on the variable least correlated with the other two, so that the conditional bivariate
-    is as well spread as possible, then integrates over it with adaptive Gauss–Kronrod quadrature.
-    The reported error is quadrature's own estimate plus the bivariate error it integrates.
+    is as well spread as possible, then integrates over it with a fixed composite Gauss–Legendre rule,
+    every node's bivariate box in one vectorised call. The rule's error is estimated as its difference
+    from a coarser rule on the same panels; where that exceeds _FIXED_RULE_TOL (a conditional bivariate
+    so tight, or singular, that the integrand has kinks) adaptive Gauss–Kronrod quadrature is used
+    instead. The reported error is the estimate plus the bivariate error it integrates.
     """
     outer = int(np.argmin([max(abs(corr[i, j]) for j in range(3) if j != i) for i in range(3)]))
     inner = [j for j in range(3) if j != outer]
@@ -131,6 +139,10 @@ def trivariate_box(a: np.ndarray, b: np.ndarray, corr: np.ndarray) -> Probabilit
     if lo >= hi:
         return Probability(0.0, "numerical", BIVARIATE_ABS_ERROR)
 
+    fixed, fixed_error = _fixed_rule(a[inner], b[inner], r_outer, spread, r_inner, lo, hi)
+    if fixed_error <= _FIXED_RULE_TOL:
+        return Probability(float(min(1.0, max(0.0, fixed))), "numerical", fixed_error + BIVARIATE_ABS_ERROR)
+
     def integrand(z: float) -> float:
         shift = r_outer * z
         box = bivariate_box((a[inner] - shift) / spread, (b[inner] - shift) / spread, r_inner).value
@@ -138,6 +150,27 @@ def trivariate_box(a: np.ndarray, b: np.ndarray, corr: np.ndarray) -> Probabilit
 
     value, quad_error = quad(integrand, lo, hi, epsabs=_QUAD_ABS_TOL, epsrel=0.0, limit=200)
     return Probability(float(min(1.0, max(0.0, value))), "numerical", float(quad_error) + BIVARIATE_ABS_ERROR)
+
+
+def _fixed_rule(
+    a: np.ndarray, b: np.ndarray, r_outer: np.ndarray, spread: np.ndarray, r_inner: float, lo: float, hi: float
+) -> tuple[float, float]:
+    """∫ φ(z) P(a < conditional bivariate < b | z) dz over [lo, hi] by both rules, and their difference."""
+    edges = np.linspace(lo, hi, _PANELS + 1)
+    mid, half = (edges[1:] + edges[:-1]) / 2, (edges[1:] - edges[:-1]) / 2
+    x = np.concatenate([_RULE[0], _CHECK[0]])
+    z = (mid[:, None] + half[:, None] * x[None, :]).ravel()  # panel-major, then rule nodes, then check nodes
+    lower = (a[None, :] - z[:, None] * r_outer[None, :]) / spread
+    upper = (b[None, :] - z[:, None] * r_outer[None, :]) / spread
+    h = np.concatenate([lower[:, 0], upper[:, 0], lower[:, 0], upper[:, 0]])
+    k = np.concatenate([lower[:, 1], lower[:, 1], upper[:, 1], upper[:, 1]])
+    tails = _bvnu(h, k, r_inner).reshape(4, -1)
+    f = (np.exp(-z * z / 2) / math.sqrt(2 * math.pi) * (tails[0] - tails[1] - tails[2] + tails[3]))
+    f = f.reshape(_PANELS, -1) * half[:, None]
+    n = len(_RULE[0])
+    value = float(np.sum(f[:, :n] @ _RULE[1]))
+    check = float(np.sum(f[:, n:] @ _CHECK[1]))
+    return value, abs(value - check)
 
 
 QMC_POINTS_LOG2 = 12  # 4096 scrambled Sobol points per randomisation

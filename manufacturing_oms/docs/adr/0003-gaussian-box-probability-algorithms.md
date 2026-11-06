@@ -1,4 +1,4 @@
-# Gaussian box probabilities: Genz BVNU in 2D, conditional quadrature in 3D, seeded QMC from 4D
+# Gaussian box probabilities: Genz BVNU in 2D, conditional Gauss–Legendre in 3D, seeded QMC from 4D
 
 Resolves U1 (spec §8), 2026-10-21.
 
@@ -12,7 +12,7 @@ Each block then uses the cheapest method that meets the spec §6 tolerances:
 |---|---|---|---|
 | 1 | `ndtr`, in the tail nearer the box (`analytic`) | 0 | µs |
 | 2 | Our vectorised port of Genz's BVNU (Drezner & Wesolowsky 1990, revised by Genz 2004: 6/12/20-point Gauss–Legendre, asymptotic expansion for \|ρ\| ≥ 0.925), by inclusion–exclusion over 4 corners (`numerical`) | 4e-15 (Genz reports about 5e-16 per corner) | about 0.07 ms |
-| 3 | Condition on the variable least correlated with the other two; integrate φ(z) × the conditional bivariate box over it with `scipy.integrate.quad` (absolute tolerance 1e-13, truncated at ±12) (`numerical`) | quad's own error estimate + 4e-15 | about 0.8 ms |
+| 3 | Condition on the variable least correlated with the other two; integrate φ(z) × the conditional bivariate box over it, truncated at ±12, with 6 panels of 24-point Gauss–Legendre, every node's bivariate box in one vectorised BVNU call. Where the rule's error estimate exceeds 1e-11, fall back to `scipy.integrate.quad` (absolute tolerance 1e-13) (`numerical`) | the 24-point rule's difference from a 12-point rule on the same panels, or quad's own estimate; + 4e-15 | about 0.4 ms (fixed rule); about 4 ms (fallback) |
 | ≥ 4 | Genz's separation of variables with Gibson–Glasbey–Elston variable ordering, on 8 independently scrambled Sobol sets of 4096 points, seeded by `rng_seed` (`monte_carlo`) | standard error of the 8 estimates | about 10 ms |
 
 Independent Features, which include every thesis case except R7 and R9, are therefore exact (`analytic`) whatever their number, and R8's four-Feature Stages need no Monte Carlo.
@@ -25,6 +25,7 @@ Independent Features, which include every thesis case except R7 and R9, are ther
 **Considered and rejected:**
 - *SciPy `multivariate_normal.cdf` for 2–3D.* Since SciPy 1.10 it uses randomised QMC in every dimension, so its value depends on `rng` and it doesn't return an error estimate. With `abseps=1e-10` it took seconds per box, and on the singular trivariate above it was 4e-6 off the exact value.
 - *SciPy's private `_bivariate_normal_cdf` ufunc.* It is the same BVNU, but private API can change without notice. Our port is about 60 lines and is checked against public-API oracles.
+- *Adaptive `quad` alone for 3D* (the original choice). It calls the bivariate box one point at a time from Python, about 87 times per box, so a box took about 4 ms, not the 0.8 ms first estimated. Optimising a Stage of three correlated Features (#42) took about 100 s. The fixed rule matches quad to 1e-15 on 227 random boxes with correlations up to ±0.8, and is about 11× faster. Quad stays as the fallback for integrands with kinks: a singular block, where the conditional correlation is ±1, or a very tight conditional bivariate. In tests, very high correlations (about 0.9 to 0.95) fall back on about 15% of boxes, and the equicorrelation −½ case on about half.
 - *Genz's TVTL trivariate algorithm.* It is faster, but much longer to port. Conditional quadrature already meets 1e-8 by several orders of magnitude, and N = 3 Stages occur only in R8, whose Features are independent anyway.
 
 **Consequences:**
