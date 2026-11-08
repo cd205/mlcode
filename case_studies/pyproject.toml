@@ -1,0 +1,26 @@
+[project]
+name = "oms-case-studies"
+version = "0.1.0"
+description = "Reproducible OMS case studies on public manufacturing datasets (docs/agents/oms_public_manufacturing_datasets.md)"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib",
+    "numpy",
+    "oms",
+    "scipy",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+oms = { path = "../manufacturing_oms", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -48,7 +48,8 @@ R8_STAGES = {"r8-seq1": 4, "r8-seq2": 3, "r8-seq3": 3, "r8-seq4": 3, "r8-seq5": 
              "r8-seq8": 1}
 
 
-@pytest.mark.parametrize("preset_id, n_stages", [("r2", 1), ("r3", 1), ("r4", 1), ("r5", 2), *R8_STAGES.items()])
+@pytest.mark.parametrize("preset_id, n_stages", [("r2", 1), ("r3", 1), ("r4", 1), ("r5", 2), *R8_STAGES.items(),
+                                                ("cs-piston-rings", 1), ("cs-piston-rings-tight", 1)])
 def test_evaluate_presets_match_their_references(preset_id, n_stages):
     sequence = client.get(f"/api/presets/{preset_id}").json()
     response = client.post("/api/evaluate", json={"sequence": sequence, "n_parts": 10_000})
