@@ -106,6 +106,21 @@ def test_trivariate_box_matches_nested_quadrature(corr):
         assert mvn.box_probability(np.zeros(3), lower, upper).value == pytest.approx(expected, abs=1e-9)
 
 
+@pytest.mark.parametrize("corr", [0.1, TRIVARIATE_CORRELATIONS[0], TRIVARIATE_CORRELATIONS[4]])
+def test_moderately_correlated_trivariate_box_needs_no_adaptive_quadrature(corr, monkeypatch):
+    # The fixed Gauss–Legendre rule is the fast path (ADR 0003); quad is only for kinked integrands.
+    import oms.distributions.integrals as integrals
+
+    def no_quad(*args, **kwargs):
+        raise AssertionError("fell back to adaptive quadrature")
+
+    monkeypatch.setattr(integrals, "quad", no_quad)
+    mvn = MultivariateNormal([1.0, 1.0, 1.0], corr)
+    for lower, upper in random_boxes(seed=7, count=6, dimension=3):
+        p = mvn.box_probability(np.zeros(3), lower, upper)
+        assert p.abs_error <= 1e-10
+
+
 def test_singular_trivariate_box_matches_its_exact_reduction():
     # With equicorrelation −1/2, Z₃ = −Z₁ − Z₂ exactly: integrate over Z₁ a 1D box on Z₂.
     mvn = MultivariateNormal([1.0, 1.0, 1.0], -0.5)
