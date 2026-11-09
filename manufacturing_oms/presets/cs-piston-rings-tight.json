@@ -1,0 +1,54 @@
+{
+  "format_version": 1,
+  "name": "Case study: piston rings, hypothetical limits 74 ± 0.02 mm",
+  "selling_price": 100.0,
+  "material_value": 20.0,
+  "stages": [
+    {
+      "features": [
+        {
+          "name": "diameter",
+          "lower": 73.98,
+          "upper": 74.02,
+          "rework_side": "lower"
+        }
+      ],
+      "variation": {
+        "type": "normal",
+        "sigmas": [
+          0.00986
+        ],
+        "corr": 0
+      },
+      "costs": {
+        "processing": 30.0,
+        "rework": {
+          "diameter": 10.0
+        },
+        "scrap": {
+          "initial": 0.0,
+          "diameter": 0.0
+        }
+      },
+      "inspection": {
+        "per_stage": 0,
+        "per_feature": 0
+      }
+    }
+  ],
+  "means": {
+    "scheme": "per_feature",
+    "values": [
+      {
+        "diameter": 74.0012
+      }
+    ]
+  },
+  "reference": {
+    "source": "Piston-ring case study, closed form",
+    "quantity": "expected_profit",
+    "value": 46.9664002,
+    "tolerance": 1e-06,
+    "note": "Hypothetical tighter limits (Cp ≈ 0.68), where Optimise moves the mean towards the reworkable undersize side. Inside diameter of forged piston rings (qcc pistonrings, Montgomery 1991), mm. σ = 0.00986 is the pooled within-sample sd of samples 1–25; the Mean Setting 74.0012 is their mean, the current process. Costs, the Rework Side (undersize bore re-machined) and the rework model are hypothetical. See case_studies/piston_rings."
+  }
+}
